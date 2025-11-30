@@ -61,21 +61,28 @@ npm start
 
 ### Interface on first load
 
+<img width="2474" height="1737" alt="image" src="https://github.com/user-attachments/assets/8d676076-3f48-490a-8ace-81afe1cc7e87" />
+
 
 ### Creating Groups (Categories) for Hosts
+
+<img width="2474" height="1737" alt="image" src="https://github.com/user-attachments/assets/544d1f06-b180-48c9-816f-50cb7b7d17df" />
 
 
 ### Adding Hosts
 
+<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/323641ea-111b-4994-80a0-9f3d41dae306" />
 
 
 ### Connecting to a Host
 
 Double click to launch the session
 
+<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/067a237b-297b-4c38-bc0f-47de238b1c00" />
 
 
 ### Editing or Deleting a Host
 
+<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/0c3d9392-c9a1-429a-85a0-c9be66c14c72" />
 
 
