@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ElectroSSH</title>
+  <link rel="stylesheet" href="./node_modules/xterm/css/xterm.css" />
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #212121;
+      color: #ccc;
+    }
+    
+    #app {
+      display: flex;
+      height: 100%;
+    }
+    
+    #sidebar {
+      width: 300px;
+      background-color: #333;
+      border-right: 1px solid #444;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      font-size: 12px;
+    }
+    
+    .sidebar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .sidebar-header h2 {
+      margin: 0;
+      font-size: 1.2em;
+      color: #eee;
+    }
+    
+    #add-host-btn {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: background-color 0.2s;
+    }
+    
+    #add-host-btn:hover {
+      background-color: #0056b3;
+    }
+    
+    #search-input {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 10px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background-color: #444;
+      color: #eee;
+      box-sizing: border-box;
+    }
+
+    .group-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    #group-filter {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background-color: #444;
+      color: #eee;
+    }
+
+    #add-group-btn {
+      background-color: #555;
+      color: #eee;
+      border: 1px solid #666;
+      padding: 7px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      white-space: nowrap;
+    }
+
+    #add-group-btn:hover {
+      background-color: #666;
+    }
+
+    #saved-hosts-list {
+      flex-grow: 1;
+      overflow-y: auto;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      scrollbar-width: thin;
+      scrollbar-color: #555 #2b2b2b;
+    }
+
+    #saved-hosts-list::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #saved-hosts-list::-webkit-scrollbar-track {
+      background: #2b2b2b;
+      border-radius: 8px;
+    }
+
+    #saved-hosts-list::-webkit-scrollbar-thumb {
+      background-color: #555;
+      border-radius: 8px;
+      border: 1px solid #3a3a3a;
+    }
+
+    #saved-hosts-list::-webkit-scrollbar-thumb:hover {
+      background-color: #666;
+    }
+
+    .group-section {
+      margin-bottom: 12px;
+    }
+
+    .group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background-color: #2b2b2b;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #eee;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      font-size: 0.9em;
+    }
+
+    .group-hosts {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .saved-host-item {
+      padding: 8px 10px;
+      border-radius: 4px;
+      background-color: #444;
+      cursor: pointer;
+      transition: background-color 0.1s;
+      position: relative; /* Needed for edit button positioning */
+    }
+
+    .saved-host-item:hover {
+      background-color: #555;
+    }
+    
+    .host-name {
+      font-weight: 400;
+      color: #fff;
+      font-size: 1em;
+    }
+
+    .host-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .host-details {
+      font-size: 0.8em;
+      color: #bbb;
+    }
+
+    .edit-host-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #aaa;
+      cursor: pointer;
+      padding: 5px;
+      line-height: 1;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+    .edit-host-btn:hover {
+      color: #fff;
+    }
+    
+    /* Main Content Area */
+    #main-content {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    
+    #tabs-bar {
+      display: flex;
+      align-items: center;
+      background-color: #2c2c2c;
+      border-bottom: 1px solid #444;
+      padding: 0 8px;
+      min-height: 35px;
+      gap: 6px;
+    }
+
+    .tab {
+      background-color: #444;
+      color: #ccc;
+      padding: 5px 10px;
+      margin-right: 2px;
+      border-radius: 4px 4px 0 0;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      display: flex;
+      align-items: center;
+      font-size: 0.9em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+    }
+    
+    .tab:hover {
+      background-color: #555;
+    }
+    
+    .tab.active {
+      background-color: #212121;
+      color: #fff;
+      border-bottom: 1px solid #212121;
+      margin-bottom: -1px;
+    }
+    
+    .close-tab {
+      margin-left: 8px;
+      font-weight: bold;
+      transition: color 0.2s;
+    }
+    
+    .close-tab:hover {
+      color: #f00;
+    }
+
+    #toolbar-spacer {
+      flex: 1;
+    }
+
+    .top-action-btn {
+      background-color: #444;
+      color: #ddd;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: background-color 0.2s, color 0.2s;
+      font-size: 0.9em;
+    }
+
+    .top-action-btn:hover {
+      background-color: #555;
+      color: #fff;
+    }
+    
+    #new-tab-btn {
+      background: none;
+      border: 1px solid #555;
+      color: #ccc;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1.2em;
+      margin-left: 5px;
+      line-height: 1;
+      transition: background-color 0.2s, color 0.2s;
+    }
+    
+    #new-tab-btn:hover {
+      background-color: #555;
+      color: #fff;
+    }
+    
+    #terminals-wrapper {
+      flex-grow: 1;
+      position: relative;
+      background-color: #000;
+    }
+
+    #main-content {
+      position: relative;
+    }
+
+    #settings-view {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #2a2a2a;
+      border-left: 1px solid #444;
+      box-sizing: border-box;
+      padding: 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      z-index: 20;
+    }
+
+    #settings-view.visible {
+      display: flex;
+    }
+
+    .settings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .settings-header h3 {
+      margin: 0;
+      color: #f5f5f5;
+    }
+
+    .settings-section {
+      background: #333;
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 12px;
+      color: #ddd;
+    }
+
+    .settings-section h4 {
+      margin: 0 0 10px 0;
+      color: #fff;
+    }
+
+    .settings-section label,
+    .settings-section input,
+    .settings-section select,
+    .settings-section button,
+    .settings-section p {
+      font-size: 0.95em;
+    }
+
+    .settings-section input,
+    .settings-section select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background: #444;
+      color: #eee;
+      box-sizing: border-box;
+      margin-bottom: 8px;
+    }
+
+    .settings-section button {
+      padding: 8px 10px;
+      background: #555;
+      border: 1px solid #666;
+      color: #eee;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .settings-section button:hover {
+      background: #666;
+    }
+
+    .inline-input {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .inline-input input {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    .inline-input button {
+      flex: 0 0 auto;
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+
+    .key-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .key-card {
+      border: 1px solid #555;
+      border-radius: 6px;
+      padding: 10px;
+      background: #3a3a3a;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .key-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .key-actions .cta {
+      flex: 0 0 auto;
+    }
+
+    .key-path {
+      color: #bbb;
+      font-size: 0.85em;
+      word-break: break-all;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-size: 0.75em;
+      color: #fff;
+      background: #555;
+    }
+    
+    .terminal-instance {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+    }
+    
+    .terminal-instance.active {
+      display: block;
+    }
+    
+    .terminal-instance .xterm, .terminal-instance .xterm-screen {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    
+    .xterm-viewport {
+      background-color: #000000; /* xterm theme background is inherited, but just in case */
+    }
+
+    /* Initial Connect Form */
+    #connect-form {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 30px;
+      background-color: #333;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      width: 300px;
+      max-width: 90%;
+    }
+    
+    #connect-form h3 {
+      text-align: center;
+      color: #eee;
+      margin-bottom: 20px;
+    }
+    
+    #connect-form input {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background-color: #444;
+      color: #eee;
+      box-sizing: border-box;
+    }
+
+    #connect-form select {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background-color: #444;
+      color: #eee;
+      box-sizing: border-box;
+      appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, #aaa 50%),
+        linear-gradient(135deg, #aaa 50%, transparent 50%);
+      background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 13px) calc(50% - 3px);
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+    
+    #btn-connect {
+      width: 100%;
+      padding: 10px;
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1.1em;
+      transition: background-color 0.2s;
+    }
+    
+    #btn-connect:hover {
+      background-color: #218838;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+
+    .error {
+      border: 1px solid #ff4444 !important;
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    
+    .modal-content {
+      background-color: #333;
+      padding: 25px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      width: 350px;
+      max-width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #555 #2b2b2b;
+    }
+
+    .modal-content::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .modal-content::-webkit-scrollbar-track {
+      background: #2b2b2b;
+      border-radius: 8px;
+    }
+
+    .modal-content::-webkit-scrollbar-thumb {
+      background-color: #555;
+      border-radius: 8px;
+      border: 1px solid #3a3a3a;
+    }
+
+    .modal-content::-webkit-scrollbar-thumb:hover {
+      background-color: #666;
+    }
+    
+    .modal-content h3 {
+      color: #eee;
+      margin-top: 0;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 10px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      color: #ccc;
+      font-size: 0.9em;
+    }
+    
+    .modal-content input[type="text"],
+    .modal-content input[type="number"],
+    .modal-content input[type="password"] {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background-color: #444;
+      color: #eee;
+      box-sizing: border-box;
+    }
+
+      .modal-content select {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 15px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background-color: #444;
+        color: #eee;
+        box-sizing: border-box;
+      }
+
+      .form-error {
+        color: #ff7b7b;
+        font-size: 0.9em;
+        margin-top: -10px;
+        margin-bottom: 10px;
+      }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-top: 20px;
+      gap: 10px;
+    }
+
+    .modal-actions button {
+      padding: 8px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: background-color 0.2s;
+    }
+    
+    #btn-save-cancel {
+      background-color: #6c757d;
+      color: white;
+    }
+    
+    #btn-save-cancel:hover {
+      background-color: #5a6268;
+    }
+    
+    #btn-save-confirm {
+      background-color: #007bff;
+      color: white;
+    }
+    
+    #btn-save-confirm:hover {
+      background-color: #0056b3;
+    }
+    
+    #btn-delete-host { /* Delete Button Style */
+      background-color: #dc3545;
+      color: white;
+    }
+
+    #btn-delete-host:hover {
+      background-color: #c82333;
+    }
+
+    /* Terminal Banner */
+    .term-banner {
+        width: 100%;
+        background-color: #dc3545;
+        color: white;
+        padding: 5px 10px;
+        font-size: 0.9em;
+        display: none; /* Hide by default */
+        align-items: center;
+        justify-content: space-between;
+        box-sizing: border-box;
+        line-height: 1.2;
+    }
+    .term-banner.visible {
+        display: flex;
+    }
+    .term-banner-btns button {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        padding: 2px 6px;
+        margin-left: 5px;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    .term-banner-btns button:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+    .term-banner-btns button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+  </style>
+  
+  <script src="./node_modules/xterm/lib/xterm.js"></script>
+  <script src="./node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+  <script src="./node_modules/xterm-addon-webgl/lib/xterm-addon-webgl.js"></script>
+  
+</head>
+<body>
+  
+  <div id="app">
+    
+    <div id="sidebar">
+      <div class="sidebar-header">
+        <h2>Saved Hosts</h2>
+        <button id="add-host-btn">Add Host</button>
+      </div>
+      <input type="text" id="search-input" placeholder="Search hosts...">
+      <div class="group-controls">
+        <select id="group-filter" aria-label="Filter hosts by group"></select>
+        <button id="add-group-btn" title="Create group">Add Group</button>
+      </div>
+      <div id="saved-hosts-list">
+        <!-- Host list populated by renderer.js -->
+      </div>
+    </div>
+
+    <div id="main-content">
+      <div id="tabs-bar">
+        <!-- Tabs populated by renderer.js -->
+        <button id="new-tab-btn" title="New Connection">+</button>
+        <div id="toolbar-spacer"></div>
+        <div id="settings-tab-slot"></div>
+      </div>
+
+      <div id="terminals-wrapper">
+        <!-- Terminal instances populated by renderer.js -->
+
+        <!-- Initial Connect Form -->
+        <div id="connect-form">
+          <h3>Quick Connect</h3>
+          <input type="text" id="inp-host" placeholder="Host (IP or DNS)">
+          <input type="number" id="inp-port" value="22" placeholder="Port">
+          <input type="text" id="inp-user" placeholder="Username">
+          <select id="auth-method">
+            <option value="password">Password</option>
+            <option value="key">SSH Key</option>
+          </select>
+          <div id="password-wrapper">
+            <input type="password" id="inp-pass" placeholder="Password (optional)">
+          </div>
+          <div id="key-wrapper" class="hidden">
+            <select id="inp-key-select"></select>
+            <input type="password" id="inp-key-passphrase" placeholder="Passphrase (if needed)">
+          </div>
+          <button id="btn-connect">Connect</button>
+        </div>
+
+        <div id="settings-view">
+          <div class="settings-header">
+            <h3>Settings</h3>
+          </div>
+
+          <div class="settings-section">
+            <h4>SSH Keys</h4>
+            <p>Manage your keys and set a default for quick connections.</p>
+            <div class="key-list" id="key-list"></div>
+          </div>
+
+          <div class="settings-section">
+            <h4>Add Existing Key</h4>
+            <label for="existing-key-path">Private key path</label>
+            <div class="inline-input">
+              <input id="existing-key-path" type="text" placeholder="/home/user/.ssh/id_ed25519">
+              <button id="btn-browse-existing-key" type="button">Browse</button>
+            </div>
+            <label for="existing-key-name">Display name (optional)</label>
+            <input id="existing-key-name" type="text" placeholder="My workstation key">
+            <button id="btn-add-existing-key">Add Key</button>
+          </div>
+
+          <div class="settings-section">
+            <h4>Generate New Key</h4>
+            <label for="new-key-name">File name</label>
+            <input id="new-key-name" type="text" placeholder="id_ed25519">
+            <label for="new-key-type">Key type</label>
+            <select id="new-key-type">
+              <option value="ed25519">ED25519</option>
+              <option value="rsa">RSA</option>
+              <option value="ecdsa">ECDSA</option>
+            </select>
+            <label for="new-key-size">Key size</label>
+            <select id="new-key-size">
+              <option value="">Default</option>
+              <option value="256">256</option>
+              <option value="384">384</option>
+              <option value="521">521</option>
+            </select>
+            <label for="new-key-directory">Save location</label>
+            <div class="inline-input">
+              <input id="new-key-directory" type="text" placeholder="~/.ssh">
+              <button id="btn-browse-key-directory" type="button">Browse</button>
+            </div>
+            <label for="new-key-passphrase">Passphrase (optional)</label>
+            <input id="new-key-passphrase" type="password" placeholder="Leave empty for none">
+            <button id="btn-generate-key">Generate</button>
+            <p id="generate-key-note" style="color:#aaa; margin-top:8px;">Keys are created in your <code>.ssh</code> directory.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Host Configuration Modal (Used for both Add and Edit) -->
+  <div id="save-host-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <h3 id="modal-title">Host Configuration</h3>
+      
+      <!-- Hidden field for storing the ID of the host being edited -->
+      <input type="hidden" id="host-id"> 
+      
+      <div class="form-group">
+        <label for="save-name">Display Name</label>
+        <input type="text" id="save-name" placeholder="My Production Server">
+      </div>
+      <div class="form-group">
+        <label for="save-host">Host (IP or DNS)</label>
+        <input type="text" id="save-host" placeholder="192.168.1.1">
+      </div>
+      <div class="form-group">
+        <label for="save-port">Port</label>
+        <input type="number" id="save-port" value="22" placeholder="22">
+      </div>
+      <div class="form-group">
+        <label for="save-user">Username</label>
+        <input type="text" id="save-user" placeholder="user">
+      </div>
+      <div class="form-group">
+        <label for="save-group">Group</label>
+        <select id="save-group"></select>
+      </div>
+      <div class="form-group">
+        <label for="save-pass">Password</label>
+        <input type="password" id="save-pass" placeholder="password (optional)">
+      </div>
+      <div class="form-group">
+        <label for="save-auth">Authentication</label>
+        <select id="save-auth">
+          <option value="password">Password</option>
+          <option value="key">SSH Key</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="save-key">SSH Key (optional)</label>
+        <select id="save-key"></select>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-save-cancel">Cancel</button>
+        <button id="btn-delete-host" class="btn-danger hidden">Delete</button>
+        <button id="btn-save-confirm">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Group Creation Modal -->
+  <div id="group-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <h3>Create Group</h3>
+      <div class="form-group">
+        <label for="group-name-input">Group Name</label>
+        <input type="text" id="group-name-input" placeholder="Production" autocomplete="off">
+        <div id="group-error" class="form-error"></div>
+      </div>
+      <div class="modal-actions">
+        <div class="right-group">
+          <button id="btn-group-cancel">Cancel</button>
+          <button id="btn-group-confirm">Create Group</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- External Libraries: Switched to local node_modules -->
+  <script src="./renderer.js"></script>
+  
+</body>
+</html>
