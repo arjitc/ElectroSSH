@@ -9,6 +9,81 @@ window.onload = function() {
   let sshKeys = [];
   let defaultKeyId = null;
   let defaultSSHDir = '';
+  let selectedHostId = null;
+
+  // Seconds between SSH keepalive packets; 0 disables them. Mirrors main.js.
+  const DEFAULT_KEEPALIVE = 5;
+  const MAX_KEEPALIVE = 3600;
+
+  // -------------------------
+  // Sidebar tree state (persisted locally)
+  // -------------------------
+  const COLLAPSED_KEY = 'electrossh.collapsedGroups';
+  const SIDEBAR_WIDTH_KEY = 'electrossh.sidebarWidth';
+
+  let collapsedGroups = new Set();
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]');
+    if (Array.isArray(stored)) collapsedGroups = new Set(stored);
+  } catch (e) {
+    collapsedGroups = new Set();
+  }
+
+  function persistCollapsedGroups() {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(collapsedGroups)));
+    } catch (e) {
+      // storage unavailable — collapse state simply won't survive a restart
+    }
+  }
+
+  // Inline SVG icons used across the sidebar
+  const ICONS = {
+    chevron: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 10.5 8l-5 4.5"/></svg>',
+    folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.8 12.5v-8a1 1 0 0 1 1-1h3l1.4 1.6h5a1 1 0 0 1 1 1v6.4a1 1 0 0 1-1 1h-9.4a1 1 0 0 1-1-1Z"/></svg>',
+    play: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5 12 8l-7 4.5z"/></svg>',
+    pencil: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.6 13.4 4.8 5.6 12.6 2.6 13.4l.8-3z"/></svg>'
+  };
+
+  // Terminal palette, tuned to match the app chrome
+  const TERMINAL_THEME = {
+    background: '#0f1216',
+    foreground: '#d7dee6',
+    cursor: '#4c8dff',
+    cursorAccent: '#0f1216',
+    selectionBackground: 'rgba(76, 141, 255, 0.30)',
+    black: '#3b4048',
+    red: '#f85149',
+    green: '#3fb950',
+    yellow: '#d29922',
+    blue: '#4c8dff',
+    magenta: '#bc8cff',
+    cyan: '#39c5cf',
+    white: '#c6cdd5',
+    brightBlack: '#6c7783',
+    brightRed: '#ff7b72',
+    brightGreen: '#56d364',
+    brightYellow: '#e3b341',
+    brightBlue: '#79b8ff',
+    brightMagenta: '#d2a8ff',
+    brightCyan: '#56d4dd',
+    brightWhite: '#f0f6fc'
+  };
+
+  // Mirrors the main-process helper so stored/legacy values display sensibly
+  function normalizeKeepalive(value) {
+    if (typeof value !== 'number' && typeof value !== 'string') return DEFAULT_KEEPALIVE;
+    if (String(value).trim() === '') return DEFAULT_KEEPALIVE;
+    const seconds = Math.floor(Number(value));
+    if (!Number.isFinite(seconds) || seconds < 0) return DEFAULT_KEEPALIVE;
+    return Math.min(seconds, MAX_KEEPALIVE);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+  }
 
   // -------------------------
   // Utility clipboard helpers (use electronAPI if provided, otherwise navigator.clipboard)
@@ -56,6 +131,30 @@ window.onload = function() {
     return;
   }
 
+  const IS_MAC = /Mac/i.test(navigator.userAgent);
+
+  // Send the clipboard to the remote shell as if it had been typed.
+  async function pasteIntoSession(sessionId, term) {
+    try {
+      const pasteText = await readClipboardText();
+      if (!pasteText) return;
+
+      // Convert newlines to '\r' so the backend receives Enter-like input as if typed
+      const normalized = pasteText.replace(/\r\n|\r|\n/g, '\r');
+
+      // Send to backend in chunks so large pastes don't overload buffers
+      const CHUNK = 2048;
+      for (let i = 0; i < normalized.length; i += CHUNK) {
+        window.electronAPI.sendInput({ sessionId, data: normalized.slice(i, i + CHUNK) });
+      }
+
+      // Focus the terminal so subsequent keys go to it
+      term.focus();
+    } catch (err) {
+      console.error("Failed to read/paste clipboard:", err);
+    }
+  }
+
   // -------------------------
   // SSH Key helpers & Settings panel
   // -------------------------
@@ -97,7 +196,7 @@ window.onload = function() {
     if (!list) return;
 
     if (sshKeys.length === 0) {
-      list.innerHTML = '<div style="color:#aaa;">No keys found. Add or generate one to get started.</div>';
+      list.innerHTML = '<div class="empty-note">No keys found. Add or generate one to get started.</div>';
       return;
     }
 
@@ -106,30 +205,33 @@ window.onload = function() {
       const card = document.createElement('div');
       card.className = 'key-card';
 
+      const body = document.createElement('div');
+      body.className = 'key-body';
+
       const header = document.createElement('div');
-      header.className = 'key-row';
-      const title = document.createElement('div');
+      header.className = 'key-title';
+      const title = document.createElement('span');
       title.textContent = key.name;
       header.appendChild(title);
 
       const badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = key.discovered ? 'Detected' : 'Saved';
+      badge.className = key.id === defaultKeyId ? 'badge accent' : 'badge';
+      badge.textContent = key.id === defaultKeyId ? 'Default' : (key.discovered ? 'Detected' : 'Saved');
       header.appendChild(badge);
-      card.appendChild(header);
+      body.appendChild(header);
 
       const pathRow = document.createElement('div');
       pathRow.className = 'key-path';
       pathRow.textContent = key.privateKeyPath;
-      card.appendChild(pathRow);
+      body.appendChild(pathRow);
+
+      card.appendChild(body);
 
       const actions = document.createElement('div');
       actions.className = 'key-actions';
 
       const label = document.createElement('label');
-      label.style.display = 'flex';
-      label.style.alignItems = 'center';
-      label.style.gap = '6px';
+      label.className = 'default-toggle';
 
       const radio = document.createElement('input');
       radio.type = 'radio';
@@ -141,16 +243,16 @@ window.onload = function() {
         await loadSSHKeys();
       };
       label.appendChild(radio);
-      label.appendChild(document.createTextNode('Use as default'));
+      label.appendChild(document.createTextNode('Default'));
       actions.appendChild(label);
 
       const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.className = 'cta';
+      deleteBtn.textContent = 'Remove';
+      deleteBtn.className = 'btn btn-danger';
       deleteBtn.title = 'Remove from the app (file on disk stays untouched).';
       deleteBtn.onclick = async () => {
         const confirmed = window.confirm(
-          `Remove ${key.name} from Electron SSH Client? This will not delete the file on disk.`
+          `Remove ${key.name} from ElectroSSH? This will not delete the file on disk.`
         );
         if (!confirmed) return;
         await window.electronAPI.deleteSSHKey(key.id);
@@ -185,24 +287,23 @@ window.onload = function() {
   }
 
   function ensureSettingsTab() {
-    const tabsBar = document.getElementById('tabs-bar');
-    const spacer = document.getElementById('toolbar-spacer');
+    const slot = document.getElementById('settings-tab-slot');
     let tab = document.getElementById('tab-settings');
 
     if (!tab) {
       tab = document.createElement('div');
       tab.className = 'tab';
       tab.id = 'tab-settings';
-      tab.innerHTML = `Settings<span class="close-tab">&times;</span>`;
+      tab.innerHTML = `<span class="tab-label">Settings</span><span class="close-tab" title="Close">&times;</span>`;
       tab.onclick = (e) => {
-        if (e.target.classList.contains('close-tab')) {
+        if (e.target.closest('.close-tab')) {
           closeSettingsTab();
         } else {
           switchTab('settings');
         }
       };
-      // Place after spacer so it sits on the right side of the bar
-      tabsBar.insertBefore(tab, spacer.nextSibling);
+      // Sits on the right hand side of the tab bar
+      slot.appendChild(tab);
     }
 
     return tab;
@@ -276,19 +377,23 @@ window.onload = function() {
     };
     btns.appendChild(reconnectBtn);
 
-    const dismissBtn = document.createElement('button');
-    dismissBtn.className = 'term-banner-dismiss';
-    dismissBtn.type = 'button';
-    dismissBtn.innerHTML = '&times;';
-    dismissBtn.onclick = (ev) => { ev.stopPropagation(); hideBannerForSession(sessionId); };
-    btns.appendChild(dismissBtn);
+    // The banner only ever appears once the session is dead, so the two useful
+    // actions are reconnecting and closing the tab outright.
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'term-banner-dismiss';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close tab';
+    closeBtn.setAttribute('aria-label', 'Close tab');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.onclick = (ev) => { ev.stopPropagation(); closeSession(sessionId); };
+    btns.appendChild(closeBtn);
 
     banner.appendChild(btns);
 
     s.bannerEl = banner;
     s.bannerMsgEl = msgSpan;
     s.bannerReconnectBtn = reconnectBtn;
-    s.bannerDismissBtn = dismissBtn;
+    s.bannerCloseBtn = closeBtn;
 
     // Insert banner as first child in normal flow (before xterm DOM) so it pushes content down
     s.container.insertBefore(banner, s.container.firstChild);
@@ -336,22 +441,34 @@ window.onload = function() {
   const groupNameInput = document.getElementById('group-name-input');
   const groupErrorEl = document.getElementById('group-error');
 
-  function resetSaveModal() {
-    document.getElementById('modal-title').textContent = 'Save New Host Configuration';
+  // Show only the credential field that matches the chosen auth method
+  function updateHostModalAuthUI() {
+    const method = document.getElementById('save-auth').value;
+    document.getElementById('save-pass-wrapper').classList.toggle('hidden', method === 'key');
+    document.getElementById('save-key-wrapper').classList.toggle('hidden', method !== 'key');
+  }
+
+  function resetSaveModal(presetGroupId) {
+    document.getElementById('modal-title').textContent = 'Add Host';
     document.getElementById('host-id').value = '';
     document.getElementById('save-name').value = '';
     document.getElementById('save-host').value = '';
     document.getElementById('save-port').value = 22;
     document.getElementById('save-user').value = '';
     document.getElementById('save-pass').value = '';
-    document.getElementById('save-group').value = activeGroupFilter !== 'all' ? activeGroupFilter : getDefaultGroupId();
+    const fallbackGroup = activeGroupFilter !== 'all' ? activeGroupFilter : getDefaultGroupId();
+    document.getElementById('save-group').value = presetGroupId || fallbackGroup;
     document.getElementById('save-auth').value = 'password';
     document.getElementById('save-key').value = '';
+    document.getElementById('save-keepalive').value = DEFAULT_KEEPALIVE;
+    document.getElementById('host-error').textContent = '';
     document.getElementById('btn-save-confirm').textContent = 'Save';
     document.getElementById('btn-delete-host').classList.add('hidden');
     document.getElementById('btn-delete-host').disabled = false;
     document.getElementById('btn-delete-host').textContent = 'Delete';
+    updateHostModalAuthUI();
     modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('save-name').focus(), 0);
   }
 
   function openGroupModal() {
@@ -370,7 +487,8 @@ window.onload = function() {
 
   function openEditHostModal(host) {
     renderKeySelectors();
-    document.getElementById('modal-title').textContent = 'Edit Host Configuration';
+    document.getElementById('modal-title').textContent = 'Edit Host';
+    document.getElementById('host-error').textContent = '';
     document.getElementById('host-id').value = host.id;
     document.getElementById('save-name').value = host.name;
     document.getElementById('save-host').value = host.host;
@@ -380,10 +498,12 @@ window.onload = function() {
     document.getElementById('save-group').value = host.groupId || getDefaultGroupId();
     document.getElementById('save-auth').value = host.authType || (host.keyId ? 'key' : 'password');
     document.getElementById('save-key').value = host.keyId || '';
+    document.getElementById('save-keepalive').value = normalizeKeepalive(host.keepalive);
     document.getElementById('btn-save-confirm').textContent = 'Save';
     document.getElementById('btn-delete-host').classList.remove('hidden');
     document.getElementById('btn-delete-host').disabled = false;
     document.getElementById('btn-delete-host').textContent = 'Delete';
+    updateHostModalAuthUI();
     modal.classList.remove('hidden');
   }
 
@@ -477,6 +597,200 @@ window.onload = function() {
   // -------------------------
   // Hosts loading UI
   // -------------------------
+  // -------------------------
+  // Sidebar host tree
+  // -------------------------
+
+  // Hosts that currently have an open session, so the tree can show a live dot
+  function connectedHostIds() {
+    const ids = new Set();
+    Object.values(sessions).forEach((s) => {
+      if (s && s.hostId) ids.add(s.hostId);
+    });
+    return ids;
+  }
+
+  function refreshHostConnectionDots() {
+    const connected = connectedHostIds();
+    document.querySelectorAll('#saved-hosts-list .tree-host').forEach((el) => {
+      el.classList.toggle('connected', connected.has(el.dataset.hostId));
+    });
+  }
+
+  function isGroupCollapsed(groupId) {
+    return collapsedGroups.has(groupId);
+  }
+
+  function setGroupCollapsed(groupId, collapsed) {
+    if (collapsed) collapsedGroups.add(groupId);
+    else collapsedGroups.delete(groupId);
+    persistCollapsedGroups();
+    updateToggleAllButton();
+  }
+
+  function updateToggleAllButton() {
+    const btn = document.getElementById('toggle-all-groups-btn');
+    if (!btn) return;
+    const headers = document.querySelectorAll('#saved-hosts-list .tree-group');
+    const anyExpanded = Array.from(headers).some((el) => !el.classList.contains('collapsed'));
+    btn.dataset.action = anyExpanded ? 'collapse' : 'expand';
+    btn.title = anyExpanded ? 'Collapse all groups' : 'Expand all groups';
+    btn.setAttribute('aria-label', btn.title);
+  }
+
+  // Move focus between the visible rows of the tree with the arrow keys
+  function focusableTreeRows() {
+    return Array.from(
+      document.querySelectorAll('#saved-hosts-list .tree-group-header, #saved-hosts-list .tree-group:not(.collapsed) .tree-host')
+    );
+  }
+
+  function moveTreeFocus(current, delta) {
+    const rows = focusableTreeRows();
+    const index = rows.indexOf(current);
+    if (index === -1) return;
+    const next = rows[index + delta];
+    if (next) next.focus();
+  }
+
+  function selectHostRow(el) {
+    selectedHostId = el.dataset.hostId;
+    document.querySelectorAll('#saved-hosts-list .tree-host.selected')
+      .forEach((node) => node.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  function buildHostRow(host, connected) {
+    const key = getKeyById(host.keyId);
+    const usesKey = host.authType === 'key' || (host.keyId && host.authType !== 'password');
+    const authLabel = usesKey ? (key ? `key: ${key.name}` : 'key') : 'password';
+    // Only worth showing when it differs from the default
+    const keepalive = normalizeKeepalive(host.keepalive);
+    const keepaliveLabel = keepalive === DEFAULT_KEEPALIVE
+      ? ''
+      : ` &middot; <span class="key-chip">${keepalive === 0 ? 'no keep-alive' : `keep-alive ${keepalive}s`}</span>`;
+
+    const el = document.createElement('div');
+    el.className = 'tree-host';
+    el.dataset.hostId = host.id;
+    el.setAttribute('role', 'treeitem');
+    el.tabIndex = -1;
+    el.title = `${host.username}@${host.host}:${host.port || 22}\nKeep-alive: ${keepalive === 0 ? 'disabled' : `${keepalive}s`}`;
+    if (connected.has(host.id)) el.classList.add('connected');
+    if (host.id === selectedHostId) el.classList.add('selected');
+
+    el.innerHTML = `
+      <span class="status-dot"></span>
+      <div class="host-text">
+        <div class="host-name">${escapeHtml(host.name)}</div>
+        <div class="host-meta">${escapeHtml(host.username)}@${escapeHtml(host.host)}:${escapeHtml(host.port || 22)} &middot; <span class="key-chip">${escapeHtml(authLabel)}</span>${keepaliveLabel}</div>
+      </div>
+      <div class="host-actions">
+        <button class="connect-host-btn" title="Connect" aria-label="Connect">${ICONS.play}</button>
+        <button class="edit-host-btn" title="Edit host" aria-label="Edit host">${ICONS.pencil}</button>
+      </div>
+    `;
+
+    el.addEventListener('click', () => selectHostRow(el));
+    el.addEventListener('dblclick', () => {
+      createSession(buildConfigFromHost(host), host.name, host.id);
+    });
+
+    el.querySelector('.connect-host-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectHostRow(el);
+      createSession(buildConfigFromHost(host), host.name, host.id);
+    });
+
+    el.querySelector('.edit-host-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEditHostModal(host);
+    });
+
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        createSession(buildConfigFromHost(host), host.name, host.id);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveTreeFocus(el, 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveTreeFocus(el, -1);
+      }
+    });
+
+    return el;
+  }
+
+  function buildGroupSection(group, hosts, connected, forceExpanded) {
+    const collapsed = forceExpanded ? false : isGroupCollapsed(group.id);
+
+    const section = document.createElement('div');
+    section.className = collapsed ? 'tree-group collapsed' : 'tree-group';
+    section.dataset.groupId = group.id;
+
+    const header = document.createElement('div');
+    header.className = 'tree-group-header';
+    header.setAttribute('role', 'treeitem');
+    header.setAttribute('aria-expanded', String(!collapsed));
+    header.tabIndex = -1;
+    header.innerHTML = `
+      <span class="twisty">${ICONS.chevron}</span>
+      <span class="group-icon">${ICONS.folder}</span>
+      <span class="group-name" title="${escapeHtml(group.name)}">${escapeHtml(group.name)}</span>
+      <span class="group-count">${hosts.length}</span>
+    `;
+
+    const toggle = () => {
+      const nowCollapsed = !section.classList.contains('collapsed');
+      section.classList.toggle('collapsed', nowCollapsed);
+      header.setAttribute('aria-expanded', String(!nowCollapsed));
+      setGroupCollapsed(group.id, nowCollapsed);
+    };
+
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      } else if (e.key === 'ArrowRight' && section.classList.contains('collapsed')) {
+        e.preventDefault();
+        toggle();
+      } else if (e.key === 'ArrowLeft' && !section.classList.contains('collapsed')) {
+        e.preventDefault();
+        toggle();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveTreeFocus(header, 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveTreeFocus(header, -1);
+      }
+    });
+
+    section.appendChild(header);
+
+    const children = document.createElement('div');
+    children.className = 'tree-children';
+    const inner = document.createElement('div');
+    inner.className = 'tree-children-inner';
+    inner.setAttribute('role', 'group');
+
+    if (hosts.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'group-empty';
+      empty.textContent = 'No hosts yet';
+      inner.appendChild(empty);
+    } else {
+      hosts.forEach((host) => inner.appendChild(buildHostRow(host, connected)));
+    }
+
+    children.appendChild(inner);
+    section.appendChild(children);
+    return section;
+  }
+
   async function loadHosts(filter = '') {
     const { hosts = [], groups: storedGroups = [] } = await window.electronAPI.getHosts();
     allHosts = hosts;
@@ -487,25 +801,37 @@ window.onload = function() {
     container.innerHTML = '';
 
     const selectedGroupId = document.getElementById('group-filter')?.value || activeGroupFilter;
-
     const lowerFilter = filter.toLowerCase().trim();
+    const searching = lowerFilter.length > 0;
+
     const filteredHosts = allHosts.filter(host => {
       const matchesGroup = selectedGroupId === 'all' || host.groupId === selectedGroupId;
-      if (!lowerFilter) return matchesGroup;
+      if (!searching) return matchesGroup;
       const matchesSearch = (
-        host.name.toLowerCase().includes(lowerFilter) ||
-        host.host.toLowerCase().includes(lowerFilter) ||
-        host.username.toLowerCase().includes(lowerFilter)
+        (host.name || '').toLowerCase().includes(lowerFilter) ||
+        (host.host || '').toLowerCase().includes(lowerFilter) ||
+        (host.username || '').toLowerCase().includes(lowerFilter)
       );
       return matchesGroup && matchesSearch;
     });
 
+    const countLabel = document.getElementById('host-count-label');
+    if (countLabel) {
+      const total = allHosts.length;
+      countLabel.textContent = searching || selectedGroupId !== 'all'
+        ? `${filteredHosts.length} of ${total}`
+        : `${total} host${total === 1 ? '' : 's'}`;
+    }
+
+    if (allHosts.length === 0) {
+      container.innerHTML = '<div class="tree-empty"><strong>No saved hosts yet</strong>Use the + button above to add your first host.</div>';
+      updateToggleAllButton();
+      return;
+    }
+
     if (filteredHosts.length === 0) {
-      if (filter) {
-        container.innerHTML = `<div style="color: #aaa; text-align: center; margin-top: 20px;">No matches found.</div>`;
-      } else {
-        container.innerHTML = `<div style="color: #aaa; text-align: center; margin-top: 20px;">No saved hosts yet.</div>`;
-      }
+      container.innerHTML = '<div class="tree-empty"><strong>No matches</strong>Try a different search or group.</div>';
+      updateToggleAllButton();
       return;
     }
 
@@ -515,90 +841,90 @@ window.onload = function() {
       if (!hostsByGroup.has(gid)) hostsByGroup.set(gid, []);
       hostsByGroup.get(gid).push(host);
     });
+    hostsByGroup.forEach(list => list.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
 
+    // Which groups get a row: every known group when browsing, only the
+    // groups holding a match while searching or filtering.
     const groupsToRender = [];
-    if (selectedGroupId === 'all') {
-      groups.forEach(g => {
-        if (hostsByGroup.has(g.id)) groupsToRender.push(g);
-      });
-
-      // Include any groups that may not be in the stored list (fallback safety)
-      hostsByGroup.forEach((_, gid) => {
-        if (!groupsToRender.some(g => g.id === gid)) {
-          groupsToRender.push({ id: gid, name: getGroupName(gid) });
-        }
-      });
-    } else {
-      const matched = groups.find(g => g.id === selectedGroupId) || { id: selectedGroupId, name: getGroupName(selectedGroupId) };
-      if (hostsByGroup.has(selectedGroupId)) groupsToRender.push(matched);
-    }
-
-    const createHostElement = (host) => {
-      const el = document.createElement('div');
-      el.dataset.hostId = host.id;
-      el.className = 'saved-host-item';
-      const key = getKeyById(host.keyId);
-      const authLabel = host.authType === 'key' || (host.keyId && host.authType !== 'password')
-        ? `SSH Key${key ? ` • ${key.name}` : ''}`
-        : 'Password';
-      el.innerHTML = `
-        <div class="host-top-row">
-          <div class="host-name">${host.name}</div>
-        </div>
-        <div class="host-details">${host.username}@${host.host}:${host.port || 22} • ${authLabel}</div>
-        <button class="edit-host-btn" title="Edit Host Configuration" aria-label="Edit Host">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-            <path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/>
-            <path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5v11z"/>
-          </svg>
-        </button>
-      `;
-
-      // Double click to connect
-      el.addEventListener('dblclick', () => {
-        createSession(buildConfigFromHost(host), host.name);
-      });
-
-      // Edit button click to open modal
-      const editBtn = el.querySelector('.edit-host-btn');
-      editBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openEditHostModal(host);
-      });
-
-      return el;
+    const pushGroup = (g) => {
+      if (!groupsToRender.some(existing => existing.id === g.id)) groupsToRender.push(g);
     };
 
-    groupsToRender.forEach(group => {
-      const section = document.createElement('div');
-      section.className = 'group-section';
-
-      const header = document.createElement('div');
-      header.className = 'group-header';
-      header.textContent = group.name;
-      section.appendChild(header);
-
-      const hostList = document.createElement('div');
-      hostList.className = 'group-hosts';
-      hostsByGroup.get(group.id).forEach(host => {
-        hostList.appendChild(createHostElement(host));
+    if (selectedGroupId === 'all') {
+      groups.forEach(g => {
+        if (!searching || hostsByGroup.has(g.id)) pushGroup(g);
       });
+    } else {
+      const matched = groups.find(g => g.id === selectedGroupId);
+      if (matched) pushGroup(matched);
+    }
 
-      section.appendChild(hostList);
-      container.appendChild(section);
+    // Safety net for hosts pointing at a group that is no longer stored
+    hostsByGroup.forEach((_, gid) => pushGroup({ id: gid, name: getGroupName(gid) }));
+
+    const connected = connectedHostIds();
+    groupsToRender.forEach(group => {
+      const groupHosts = hostsByGroup.get(group.id) || [];
+      // While searching, always reveal the groups that contain a hit
+      container.appendChild(buildGroupSection(group, groupHosts, connected, searching));
     });
+
+    updateToggleAllButton();
   }
 
-  document.getElementById('search-input').addEventListener('input', (e) => {
+
+  const searchInput = document.getElementById('search-input');
+  const clearSearchBtn = document.getElementById('clear-search-btn');
+
+  function syncClearSearchBtn() {
+    clearSearchBtn.classList.toggle('visible', searchInput.value.length > 0);
+  }
+
+  searchInput.addEventListener('input', (e) => {
+    syncClearSearchBtn();
     loadHosts(e.target.value);
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && searchInput.value) {
+      e.preventDefault();
+      searchInput.value = '';
+      syncClearSearchBtn();
+      loadHosts();
+    }
+  });
+
+  clearSearchBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    syncClearSearchBtn();
+    loadHosts();
+    searchInput.focus();
   });
 
   document.getElementById('group-filter').addEventListener('change', (e) => {
     activeGroupFilter = e.target.value;
-    loadHosts(document.getElementById('search-input').value);
+    loadHosts(searchInput.value);
+  });
+
+  // Collapse / expand every group at once
+  document.getElementById('toggle-all-groups-btn').addEventListener('click', (e) => {
+    const collapse = e.currentTarget.dataset.action !== 'expand';
+    document.querySelectorAll('#saved-hosts-list .tree-group').forEach((section) => {
+      section.classList.toggle('collapsed', collapse);
+      const header = section.querySelector('.tree-group-header');
+      if (header) header.setAttribute('aria-expanded', String(!collapse));
+      if (collapse) collapsedGroups.add(section.dataset.groupId);
+      else collapsedGroups.delete(section.dataset.groupId);
+    });
+    persistCollapsedGroups();
+    updateToggleAllButton();
   });
 
   document.getElementById('add-group-btn').addEventListener('click', openGroupModal);
+
+  document.getElementById('open-settings-btn').addEventListener('click', () => openSettingsTab());
+
+  document.getElementById('save-auth').addEventListener('change', updateHostModalAuthUI);
 
   document.getElementById('btn-group-cancel').addEventListener('click', closeGroupModal);
   document.getElementById('btn-group-confirm').addEventListener('click', handleCreateGroup);
@@ -622,6 +948,20 @@ window.onload = function() {
   // Save/Update Host logic
   document.getElementById('btn-save-confirm').onclick = async () => {
     const hostId = document.getElementById('host-id').value;
+    const errorEl = document.getElementById('host-error');
+
+    // A number input hands back '' for anything unparseable, so an empty
+    // box simply means "use the default"; negatives and decimals are rejected.
+    const keepaliveRaw = document.getElementById('save-keepalive').value.trim();
+    let keepalive = DEFAULT_KEEPALIVE;
+    if (keepaliveRaw !== '') {
+      const parsed = Number(keepaliveRaw);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_KEEPALIVE) {
+        errorEl.textContent = `Keep-alive must be a whole number of seconds from 0 to ${MAX_KEEPALIVE} (0 disables it).`;
+        return;
+      }
+      keepalive = parsed;
+    }
 
     const hostData = {
       id: hostId || null,
@@ -633,17 +973,21 @@ window.onload = function() {
       groupId: document.getElementById('save-group').value,
       authType: document.getElementById('save-auth').value,
       keyId: document.getElementById('save-key').value || null,
+      keepalive,
     };
 
     if (!hostData.name || !hostData.host || !hostData.username) {
-      console.error("Display Name, Host, and Username are required.");
+      errorEl.textContent = 'Display name, host and username are required.';
       return;
     }
 
+    errorEl.textContent = '';
     await window.electronAPI.saveHost(hostData);
     modal.classList.add('hidden');
-    document.getElementById('search-input').value = '';
-    loadHosts();
+    // A newly saved host should be visible, so make sure its group is open
+    collapsedGroups.delete(hostData.groupId);
+    persistCollapsedGroups();
+    loadHosts(document.getElementById('search-input').value);
   };
 
   // Delete Host logic
@@ -656,6 +1000,9 @@ window.onload = function() {
       return;
     }
 
+    const confirmed = window.confirm(`Delete "${hostName}"? This cannot be undone.`);
+    if (!confirmed) return;
+
     try {
       const deleteBtn = document.getElementById('btn-delete-host');
       deleteBtn.disabled = true;
@@ -663,9 +1010,9 @@ window.onload = function() {
 
       await window.electronAPI.deleteHost(hostId);
       console.log(`Host '${hostName}' (ID: ${hostId}) deleted.`);
+      if (selectedHostId === hostId) selectedHostId = null;
       modal.classList.add('hidden');
-      document.getElementById('search-input').value = '';
-      loadHosts();
+      loadHosts(document.getElementById('search-input').value);
     } catch (error) {
       console.error("Error deleting host:", error);
       const deleteBtn = document.getElementById('btn-delete-host');
@@ -680,7 +1027,8 @@ window.onload = function() {
       host: host.host,
       port: host.port || 22,
       username: host.username,
-      password: host.password || ''
+      password: host.password || '',
+      keepalive: normalizeKeepalive(host.keepalive)
     };
 
     const selectedKey = host.keyId ? getKeyById(host.keyId) : getKeyById(defaultKeyId);
@@ -701,7 +1049,7 @@ window.onload = function() {
   // -------------------------
   // Create Session (term + banner + handlers)
   // -------------------------
-  function createSession(config = null, title = "New Connection") {
+  function createSession(config = null, title = "New Connection", hostId = null) {
     const sessionId = Date.now().toString();
 
     // Container & banner
@@ -710,96 +1058,151 @@ window.onload = function() {
     termContainer.className = 'terminal-instance active';
     termContainer.id = `term-${sessionId}`;
 
+    // xterm lives in its own child so the banner can sit above it in flow
+    const termHost = document.createElement('div');
+    termHost.className = 'terminal-host';
+    termContainer.appendChild(termHost);
+
     // append container (banner will be inserted by createBanner)
     termWrapper.appendChild(termContainer);
 
     // Initialize Xterm
     const term = new Terminal({
       cursorBlink: true,
-      allowTransparency: true,
-      scrollback: 9999,
-      theme: { background: '#000000' }
+      scrollback: 10000,
+      fontFamily: "'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace",
+      fontSize: 13,
+      lineHeight: 1.2,
+      drawBoldTextInBrightColors: false,
+      macOptionIsMeta: true,
+      theme: TERMINAL_THEME
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
-    term.open(termContainer);
+    term.open(termHost);
 
+    // The WebGL renderer is much faster, but its context can be lost (GPU
+    // reset, driver update). When that happens we drop it and let xterm fall
+    // back to the DOM renderer instead of leaving a blank terminal behind.
+    let webglAddon = null;
     try {
-      const webglAddon = new WebglAddon.WebglAddon();
+      webglAddon = new WebglAddon.WebglAddon();
+      webglAddon.onContextLoss(() => {
+        console.warn('WebGL context lost, falling back to the DOM renderer');
+        try { webglAddon.dispose(); } catch (e) { /* already gone */ }
+        const session = sessions[sessionId];
+        if (session) session.webglAddon = null;
+      });
       term.loadAddon(webglAddon);
     } catch (e) {
       console.warn("WebGL addon failed to load, falling back to canvas", e);
+      webglAddon = null;
     }
 
     // Save session (with bannerEl placeholder)
-    sessions[sessionId] = { term, fitAddon, container: termContainer, title, bannerEl: null, tabEl: null, config: config || null };
+    sessions[sessionId] = {
+      term, fitAddon, webglAddon, container: termContainer, termHost, title,
+      bannerEl: null, tabEl: null, config: config || null, hostId
+    };
 
     // --- Clipboard Copy (Left-Click Selection) ---
-    // Copy selected text into system clipboard using navigator.clipboard or electronAPI
+    // onSelectionChange fires continuously while dragging, so settle first and
+    // write the clipboard once the selection stops changing.
+    let selectionTimer = null;
     term.onSelectionChange(() => {
-      try {
-        const selection = term.getSelection();
-        if (selection && selection.length > 0) {
-          writeClipboardText(selection).catch(err => {
-            // swallow - user may not permit clipboard write in some contexts
-            console.warn('Failed to write selection to clipboard:', err);
-          });
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        try {
+          const selection = term.getSelection();
+          if (selection && selection.length > 0) {
+            writeClipboardText(selection).catch(err => {
+              // swallow - user may not permit clipboard write in some contexts
+              console.warn('Failed to write selection to clipboard:', err);
+            });
+          }
+        } catch (e) {
+          console.warn('Selection copy failed:', e);
         }
-      } catch (e) {
-        console.warn('Selection copy failed:', e);
-      }
+      }, 120);
     });
 
-    // --- Right-click paste: send to backend (works with electronAPI or navigator.clipboard) ---
-    termContainer.addEventListener('contextmenu', async (e) => {
+    // --- Ctrl+Shift+C / Ctrl+Shift+V (Cmd+C / Cmd+V on macOS) ---
+    // Plain Ctrl+C must stay SIGINT, so only the shifted pair is intercepted.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+
+      const key = (e.key || '').toLowerCase();
+      const shortcut = IS_MAC
+        ? (e.metaKey && !e.ctrlKey && !e.altKey)
+        : (e.ctrlKey && e.shiftKey && !e.altKey);
+      if (!shortcut) return true;
+
+      if (key === 'c') {
+        const selection = term.getSelection();
+        if (!selection) return true;
+        writeClipboardText(selection).catch(() => {});
+        return false;
+      }
+
+      if (key === 'v') {
+        pasteIntoSession(sessionId, term);
+        return false;
+      }
+
+      return true;
+    });
+
+    // --- Right-click paste ---
+    termContainer.addEventListener('contextmenu', (e) => {
       if (activeSessionId !== sessionId) return;
       e.preventDefault();
       e.stopPropagation();
-
-      try {
-        const pasteText = await readClipboardText();
-        if (!pasteText) return;
-
-        // Convert newlines to '\r' so the backend receives Enter-like input as if typed
-        const normalized = pasteText.replace(/\r\n|\r|\n/g, '\r');
-
-        // Send to backend in chunks so large pastes don't overload buffers
-        const CHUNK = 2048;
-        for (let i = 0; i < normalized.length; i += CHUNK) {
-          const chunk = normalized.slice(i, i + CHUNK);
-          window.electronAPI.sendInput({ sessionId, data: chunk });
-        }
-
-        // Focus the terminal so subsequent keys go to it
-        term.focus();
-      } catch (err) {
-        console.error("Failed to read/paste clipboard:", err);
-      }
+      pasteIntoSession(sessionId, term);
     });
 
     // Create Tab UI
-    const tabsBar = document.getElementById('tabs-bar');
-    const newTabBtn = document.getElementById('new-tab-btn');
+    const tabsStrip = document.getElementById('tabs-strip');
     const tabEl = document.createElement('div');
     tabEl.className = 'tab active';
     tabEl.id = `tab-${sessionId}`;
-    tabEl.innerHTML = `${title}<span class="close-tab">&times;</span>`;
+    tabEl.title = title;
+    tabEl.innerHTML = `<span class="tab-dot"></span><span class="tab-label">${escapeHtml(title)}</span><span class="close-tab" title="Close">&times;</span>`;
 
     tabEl.onclick = (e) => {
-      if (e.target.classList.contains('close-tab')) closeSession(sessionId);
+      if (e.target.closest('.close-tab')) closeSession(sessionId);
       else switchTab(sessionId);
     };
-    tabsBar.insertBefore(tabEl, newTabBtn);
+    // Middle-click closes the tab, as in a browser
+    tabEl.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        closeSession(sessionId);
+      }
+    });
+    tabsStrip.appendChild(tabEl);
+    tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
     // attach tabEl ref into session
     sessions[sessionId].tabEl = tabEl;
+    refreshHostConnectionDots();
 
     // Connect after a short delay for stable sizing (store config on session for reconnect)
-    setTimeout(() => {
-      fitAddon.fit();
+    sessions[sessionId].connectTimer = setTimeout(() => {
+      // The tab can be closed before this fires; connecting now would leave an
+      // SSH connection in the main process that nothing will ever close.
+      const session = sessions[sessionId];
+      if (!session) return;
+      session.connectTimer = null;
+
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        console.warn('Initial fit failed', e);
+      }
+
       if (config) {
         // Save config for reconnect attempts
-        sessions[sessionId].config = config;
+        session.config = config;
         term.write(`Connecting to ${config.host}...\r\n`);
         document.getElementById('connect-form').classList.add('hidden');
         const size = { cols: term.cols, rows: term.rows };
@@ -859,8 +1262,26 @@ window.onload = function() {
     const tab = document.getElementById(`tab-${sessionId}`);
     if (tab) tab.remove();
     const session = sessions[sessionId];
-    if (session) session.container.remove();
+    if (session) {
+      if (session.connectTimer) clearTimeout(session.connectTimer);
+      // Dispose the terminal, or every closed tab leaks its listeners and
+      // its WebGL context (browsers only allow a handful of those at once).
+      // The two disposals are independent: a throwing addon must not stop the
+      // terminal itself from being released.
+      try {
+        if (session.webglAddon) session.webglAddon.dispose();
+      } catch (e) {
+        console.warn('WebGL addon disposal failed', e);
+      }
+      try {
+        session.term.dispose();
+      } catch (e) {
+        console.warn('Terminal disposal failed', e);
+      }
+      session.container.remove();
+    }
     delete sessions[sessionId];
+    refreshHostConnectionDots();
 
     const remainingIds = Object.keys(sessions);
     if (remainingIds.length > 0) {
@@ -872,19 +1293,53 @@ window.onload = function() {
   }
 
   // -------------------------
-  // Window resize handling
+  // Resize handling
   // -------------------------
-  window.addEventListener('resize', () => {
-    if (activeSessionId && sessions[activeSessionId]) {
+
+  // Refit the visible terminal and tell the remote pty about the new size.
+  // Debounced because a window drag fires this continuously, and every call
+  // is a reflow plus an IPC round trip.
+  let resizeTimer = null;
+  function refitActiveTerminal() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
       const s = sessions[activeSessionId];
-      s.fitAddon.fit();
+      if (!s) return;
+      try {
+        s.fitAddon.fit();
+      } catch (e) {
+        return; // container not laid out yet
+      }
       window.electronAPI.resizeTerm({
         sessionId: activeSessionId,
         cols: s.term.cols,
         rows: s.term.rows
       });
+    }, 80);
+  }
+
+  // Push one session's current size to its pty. Only the visible terminal can
+  // be measured, so an inactive tab just re-sends the size it already has.
+  function syncSessionSize(sessionId) {
+    const s = sessions[sessionId];
+    if (!s) return;
+    if (sessionId === activeSessionId) {
+      try {
+        s.fitAddon.fit();
+      } catch (e) {
+        // container not laid out yet; the stored dimensions still apply
+      }
     }
-  });
+    window.electronAPI.resizeTerm({ sessionId, cols: s.term.cols, rows: s.term.rows });
+  }
+
+  // A ResizeObserver covers layout changes the window never sees, such as
+  // dragging the sidebar divider or showing/hiding the disconnect banner. The
+  // window listener stays as a backstop in case observer delivery is throttled.
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(refitActiveTerminal).observe(document.getElementById('terminals-wrapper'));
+  }
+  window.addEventListener('resize', refitActiveTerminal);
 
   // -------------------------
   // IPC Listeners from main
@@ -894,15 +1349,26 @@ window.onload = function() {
     if (s) s.term.write(data);
   });
 
+  function setTabConnected(sessionId, connected) {
+    const s = sessions[sessionId];
+    if (s && s.tabEl) s.tabEl.classList.toggle('disconnected', !connected);
+  }
+
   window.electronAPI.onStatus(({ sessionId, status, code, signal, hadError }) => {
     // Connected -> hide banner
     if (status === 'Connected') {
+      setTabConnected(sessionId, true);
       hideBannerForSession(sessionId);
+      // The window may have been resized during the handshake, so make sure
+      // the pty ends up matching the terminal it is actually drawing into.
+      syncSessionSize(sessionId);
       return;
     }
 
     // ignore transient window-change
     if (status === 'window-change') return;
+
+    setTabConnected(sessionId, false);
 
     // Map statuses to readable messages
     let msg = '';
@@ -916,6 +1382,7 @@ window.onload = function() {
 
   window.electronAPI.onError(({ sessionId, message }) => {
     console.error('ssh-error', sessionId, message);
+    setTabConnected(sessionId, false);
     showBannerForSession(sessionId, `Error: ${message}`, 'error');
   });
 
@@ -951,7 +1418,8 @@ window.onload = function() {
       port: portInput.value,
       username: userInput.value,
       password: passInput.value,
-      authType: authMethod
+      authType: authMethod,
+      keepalive: DEFAULT_KEEPALIVE
     };
 
     if (authMethod === 'key') {
@@ -1102,7 +1570,75 @@ window.onload = function() {
     }
   });
 
+  // -------------------------
+  // Sidebar resizing (drag the divider, width is remembered)
+  // -------------------------
+  const sidebarEl = document.getElementById('sidebar');
+  const resizer = document.getElementById('sidebar-resizer');
+
+  function applySidebarWidth(width) {
+    const clamped = Math.min(520, Math.max(200, width));
+    sidebarEl.style.width = `${clamped}px`;
+    return clamped;
+  }
+
+  try {
+    const storedWidth = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY), 10);
+    if (Number.isFinite(storedWidth)) applySidebarWidth(storedWidth);
+  } catch (e) {
+    // ignore unavailable storage
+  }
+
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    resizer.classList.add('dragging');
+    document.body.classList.add('resizing');
+
+    const onMove = (ev) => {
+      applySidebarWidth(ev.clientX - sidebarEl.getBoundingClientRect().left);
+    };
+
+    const onUp = () => {
+      resizer.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(parseInt(sidebarEl.style.width, 10)));
+      } catch (err) {
+        // ignore unavailable storage
+      }
+      // The terminal needs to re-measure against the new width
+      refitActiveTerminal();
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Esc closes whichever modal is open; clicking the backdrop does the same
+  modal.addEventListener('mousedown', (e) => {
+    if (e.target === modal) modal.classList.add('hidden');
+  });
+  groupModal.addEventListener('mousedown', (e) => {
+    if (e.target === groupModal) closeGroupModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
+    else if (!groupModal.classList.contains('hidden')) closeGroupModal();
+  });
+
+  // Flag the body so the CSS can leave room for native window controls
+  if (typeof window.electronAPI.getWindowChrome === 'function') {
+    window.electronAPI.getWindowChrome().then((mode) => {
+      if (!mode || mode === 'native') return;
+      document.body.classList.add('frameless', mode);
+    }).catch(() => { /* fall back to the default framed layout */ });
+  }
+
   // initial load
+  syncClearSearchBtn();
   loadSSHKeys().finally(() => {
     updateQuickConnectAuthUI();
     loadHosts();
