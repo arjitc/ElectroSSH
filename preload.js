@@ -15,11 +15,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings events
   onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
 
+  // Window chrome ('overlay-right', 'overlay-left' or 'native')
+  getWindowChrome: () => ipcRenderer.invoke('window-chrome'),
+
   // Host Management
   getHosts: () => ipcRenderer.invoke('get-hosts'),
   saveHost: (hostData) => ipcRenderer.invoke('save-host', hostData),
   deleteHost: (hostId) => ipcRenderer.invoke('delete-host', hostId),
   saveGroup: (groupName) => ipcRenderer.invoke('save-group', groupName),
+  renameGroup: (payload) => ipcRenderer.invoke('rename-group', payload),
+  deleteGroup: (groupId) => ipcRenderer.invoke('delete-group', groupId),
 
   // SSH Keys
   listSSHKeys: () => ipcRenderer.invoke('list-ssh-keys'),

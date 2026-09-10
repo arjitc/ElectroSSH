@@ -15,6 +15,21 @@ console.log('Host data path:', hostsFilePath);
 const sessions = {};
 const defaultGroup = { id: 'default', name: 'Default' };
 
+// Seconds between SSH keepalive packets. 0 turns keepalives off entirely.
+const DEFAULT_KEEPALIVE = 5;
+const MAX_KEEPALIVE = 3600;
+
+// Accepts whatever the renderer or an older store had and returns a usable
+// number of seconds: anything unparseable falls back to the default, and
+// only an explicit 0 disables keepalives.
+function normalizeKeepalive(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return DEFAULT_KEEPALIVE;
+  if (String(value).trim() === '') return DEFAULT_KEEPALIVE;
+  const seconds = Math.floor(Number(value));
+  if (!Number.isFinite(seconds) || seconds < 0) return DEFAULT_KEEPALIVE;
+  return Math.min(seconds, MAX_KEEPALIVE);
+}
+
 // Default SSH directory for discovery and generation
 const defaultSSHDir = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ssh');
 
@@ -35,8 +50,12 @@ function readHostStore() {
     // ignore parse errors and return defaults
   }
   
-  // Ensure all hosts have a group assignment
-  store.hosts = store.hosts.map(h => ({ ...h, groupId: h.groupId || defaultGroup.id }));
+  // Ensure every host has a group assignment and a keepalive value
+  store.hosts = store.hosts.map(h => ({
+    ...h,
+    groupId: h.groupId || defaultGroup.id,
+    keepalive: normalizeKeepalive(h.keepalive)
+  }));
   
   // Ensure default group always exists
   if (!store.groups.some(g => g.id === defaultGroup.id)) {
@@ -179,19 +198,49 @@ function discoverSSHKeys() {
   return discovered;
 }
 
+// The window controls are drawn over our own top bar on Windows and macOS.
+// Other platforms keep the standard frame, where overlays are unreliable.
+function windowChromeMode() {
+  if (process.platform === 'win32') return 'overlay-right';
+  if (process.platform === 'darwin') return 'overlay-left';
+  return 'native';
+}
+
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
+  const chrome = windowChromeMode();
+
+  const options = {
+    width: 1180,
+    height: 760,
+    minWidth: 780,
+    minHeight: 480,
+    backgroundColor: '#0f1216',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true
     }
-  });
-  
+  };
+
+  if (chrome === 'overlay-right') {
+    options.titleBarStyle = 'hidden';
+    options.titleBarOverlay = {
+      color: '#12161b',
+      symbolColor: '#98a3b0',
+      height: 42
+    };
+  } else if (chrome === 'overlay-left') {
+    options.titleBarStyle = 'hiddenInset';
+    options.trafficLightPosition = { x: 14, y: 13 };
+  }
+
+  mainWindow = new BrowserWindow(options);
+
   mainWindow.loadFile('index.html');
 }
+
+ipcMain.handle('window-chrome', () => windowChromeMode());
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
@@ -483,6 +532,7 @@ function buildMenu() {
       
       ipcMain.handle('save-host', async (event, hostData) => {
         const store = readHostStore();
+        hostData = { ...hostData, keepalive: normalizeKeepalive(hostData.keepalive) };
         const targetGroupId = hostData.groupId || defaultGroup.id;
         const hasGroup = store.groups.some(g => g.id === targetGroupId);
         if (!hasGroup) {
@@ -512,6 +562,48 @@ function buildMenu() {
         return store;
       });
       
+      // A group is only removable once it is empty. The renderer disables the
+      // button in that case, but the rule is enforced here too so a stale
+      // window can't delete a group that has gained hosts in the meantime.
+      ipcMain.handle('delete-group', async (event, groupId) => {
+        const store = readHostStore();
+        if (!groupId) return { ok: false, reason: 'missing-id', store };
+
+        // readHostStore re-creates the default group whenever it is absent, so
+        // removing it would just make it reappear under its original name.
+        if (groupId === defaultGroup.id) return { ok: false, reason: 'default-group', store };
+
+        if (!store.groups.some(g => g.id === groupId)) {
+          return { ok: false, reason: 'not-found', store };
+        }
+
+        const hostCount = store.hosts.filter(h => (h.groupId || defaultGroup.id) === groupId).length;
+        if (hostCount > 0) return { ok: false, reason: 'has-hosts', hostCount, store };
+
+        store.groups = store.groups.filter(g => g.id !== groupId);
+        writeHostStore(store);
+        return { ok: true, store: readHostStore() };
+      });
+
+      ipcMain.handle('rename-group', async (event, { groupId, name }) => {
+        const trimmed = (name || '').trim();
+        const store = readHostStore();
+        if (!groupId || !trimmed) return store;
+
+        const target = store.groups.find(g => g.id === groupId);
+        if (!target) return store;
+
+        // Another group already using the name blocks the rename
+        const clash = store.groups.some(
+          g => g.id !== groupId && g.name.toLowerCase() === trimmed.toLowerCase()
+        );
+        if (clash) return store;
+
+        target.name = trimmed;
+        writeHostStore(store);
+        return readHostStore();
+      });
+
       ipcMain.handle('save-group', async (event, groupName) => {
         const trimmed = (groupName || '').trim();
         if (!trimmed) return readHostStore();
@@ -529,6 +621,26 @@ function buildMenu() {
       
       
       // --- SSH Connection Management ---
+
+      // Push a session's most recent terminal size to the remote pty. Safe to
+      // call before the shell exists; it is re-applied once the stream opens.
+      function applyWindowSize(session) {
+        if (!session || !session.stream || !session.size) return;
+        const { cols, rows } = session.size;
+        if (!cols || !rows) return;
+        if (session.appliedSize
+            && session.appliedSize.cols === cols
+            && session.appliedSize.rows === rows) {
+          return;
+        }
+        try {
+          // ssh2 wants (rows, cols); 0 pixel dimensions means "unspecified"
+          session.stream.setWindow(rows, cols, 0, 0);
+          session.appliedSize = { cols, rows };
+        } catch (err) {
+          console.error(`setWindow failed for ${session.id}: ${err.message}`);
+        }
+      }
       
       ipcMain.on('ssh-disconnect', (event, sessionId) => {
         const session = sessions[sessionId];
@@ -549,19 +661,26 @@ function buildMenu() {
         }
         
         const conn = new Client();
-        sessions[sessionId] = { conn, stream: null };
-        
+        sessions[sessionId] = { id: sessionId, conn, stream: null, size: { ...size }, appliedSize: null };
+
         conn.on('ready', () => {
           event.sender.send('ssh-status', { sessionId, status: 'Connected' });
-          
-          conn.shell({ term: 'xterm-256color', cols: size.cols, rows: size.rows }, (err, stream) => {
+
+          // Open the shell at whatever size the terminal is *now*, which may
+          // differ from the size sent with the connect request if the window
+          // was resized while the handshake was in flight.
+          const current = sessions[sessionId] ? sessions[sessionId].size : size;
+          conn.shell({ term: 'xterm-256color', cols: current.cols, rows: current.rows }, (err, stream) => {
             if (err) {
               event.sender.send('ssh-error', { sessionId, message: err.message });
               delete sessions[sessionId];
               return;
             }
             sessions[sessionId].stream = stream;
-            
+            sessions[sessionId].appliedSize = { ...current };
+            // Catch any resize that landed between 'ready' and the shell opening
+            applyWindowSize(sessions[sessionId]);
+
             stream.on('data', (data) => {
               event.sender.send('ssh-data', { sessionId, data: data.toString('utf-8') });
             });
@@ -599,12 +718,14 @@ function buildMenu() {
         });
         
         try {
+          const keepaliveSeconds = normalizeKeepalive(config.keepalive);
           const connConfig = {
             host: config.host,
             port: parseInt(config.port),
             username: config.username,
-            keepaliveInterval: (parseInt(config.keepalive) || 15) * 1000, 
-            keepaliveCountMax: 3 // Default attempts before disconnecting
+            // ssh2 treats 0 as "no keepalives"
+            keepaliveInterval: keepaliveSeconds * 1000,
+            keepaliveCountMax: 3 // Missed replies tolerated before disconnecting
           };
           
           if (config.authType === 'key' && config.privateKeyPath) {
@@ -660,7 +781,12 @@ function buildMenu() {
       
       ipcMain.on('term-resize', (event, { sessionId, cols, rows }) => {
         const session = sessions[sessionId];
-        if (session && session.stream) {
-          session.stream.setWindow(rows, cols);
-        }
+        if (!session) return;
+
+        // Always remember the latest size. A resize can arrive while the SSH
+        // handshake is still in flight; previously those were dropped, so the
+        // pty kept the size it was opened with while xterm had already grown
+        // and full-screen apps such as htop drew short.
+        session.size = { cols, rows };
+        applyWindowSize(session);
       });
