@@ -562,6 +562,48 @@ function buildMenu() {
         return store;
       });
       
+      // A group is only removable once it is empty. The renderer disables the
+      // button in that case, but the rule is enforced here too so a stale
+      // window can't delete a group that has gained hosts in the meantime.
+      ipcMain.handle('delete-group', async (event, groupId) => {
+        const store = readHostStore();
+        if (!groupId) return { ok: false, reason: 'missing-id', store };
+
+        // readHostStore re-creates the default group whenever it is absent, so
+        // removing it would just make it reappear under its original name.
+        if (groupId === defaultGroup.id) return { ok: false, reason: 'default-group', store };
+
+        if (!store.groups.some(g => g.id === groupId)) {
+          return { ok: false, reason: 'not-found', store };
+        }
+
+        const hostCount = store.hosts.filter(h => (h.groupId || defaultGroup.id) === groupId).length;
+        if (hostCount > 0) return { ok: false, reason: 'has-hosts', hostCount, store };
+
+        store.groups = store.groups.filter(g => g.id !== groupId);
+        writeHostStore(store);
+        return { ok: true, store: readHostStore() };
+      });
+
+      ipcMain.handle('rename-group', async (event, { groupId, name }) => {
+        const trimmed = (name || '').trim();
+        const store = readHostStore();
+        if (!groupId || !trimmed) return store;
+
+        const target = store.groups.find(g => g.id === groupId);
+        if (!target) return store;
+
+        // Another group already using the name blocks the rename
+        const clash = store.groups.some(
+          g => g.id !== groupId && g.name.toLowerCase() === trimmed.toLowerCase()
+        );
+        if (clash) return store;
+
+        target.name = trimmed;
+        writeHostStore(store);
+        return readHostStore();
+      });
+
       ipcMain.handle('save-group', async (event, groupName) => {
         const trimmed = (groupName || '').trim();
         if (!trimmed) return readHostStore();

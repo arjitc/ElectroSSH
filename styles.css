@@ -796,3 +796,30 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   line-height: 1.45;
   color: var(--text-faint);
 }
+
+.rename-group-btn {
+  flex: none;
+  width: 20px; height: 20px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity .12s, background-color .12s, color .12s;
+}
+.tree-group-header:hover .rename-group-btn,
+.tree-group-header:focus-within .rename-group-btn { opacity: 1; }
+.rename-group-btn:hover { background: var(--bg-elevated); color: var(--text); }
+.rename-group-btn:focus-visible { opacity: 1; box-shadow: 0 0 0 2px var(--accent-soft); }
+
+/* A disabled button must not light up on hover */
+.btn:disabled:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
+.btn-danger:disabled:hover {
+  background: transparent;
+  border-color: rgba(248, 81, 73, .5);
+  color: var(--danger);
+}
+
+#group-delete-note { margin: 2px 0 0; }

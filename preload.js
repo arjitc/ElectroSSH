@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveHost: (hostData) => ipcRenderer.invoke('save-host', hostData),
   deleteHost: (hostId) => ipcRenderer.invoke('delete-host', hostId),
   saveGroup: (groupName) => ipcRenderer.invoke('save-group', groupName),
+  renameGroup: (payload) => ipcRenderer.invoke('rename-group', payload),
+  deleteGroup: (groupId) => ipcRenderer.invoke('delete-group', groupId),
 
   // SSH Keys
   listSSHKeys: () => ipcRenderer.invoke('list-ssh-keys'),

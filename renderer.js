@@ -471,18 +471,68 @@ window.onload = function() {
     setTimeout(() => document.getElementById('save-name').focus(), 0);
   }
 
-  function openGroupModal() {
+  // The same modal creates a group and renames one; `editingGroupId` decides.
+  let editingGroupId = null;
+
+  // Total hosts in a group, ignoring the current search/filter
+  function hostCountForGroup(groupId) {
+    return allHosts.filter(h => (h.groupId || 'default') === groupId).length;
+  }
+
+  // A group can only be deleted once it is empty, and the built-in Default
+  // group never can. Both cases disable the button and say why.
+  function updateGroupDeleteButton(group) {
+    const btn = document.getElementById('btn-group-delete');
+    const note = document.getElementById('group-delete-note');
+    if (!btn || !note) return;
+
+    if (!group) {
+      btn.classList.add('hidden');
+      note.classList.add('hidden');
+      note.textContent = '';
+      return;
+    }
+
+    const count = hostCountForGroup(group.id);
+    let blockedReason = '';
+    if (group.id === 'default') {
+      blockedReason = 'The Default group is built in and cannot be deleted.';
+    } else if (count > 0) {
+      blockedReason = `This group cannot be deleted because it has ${count} host${count === 1 ? '' : 's'} under it. Move or delete them first.`;
+    }
+
+    btn.classList.remove('hidden');
+    btn.disabled = Boolean(blockedReason);
+    btn.title = blockedReason || `Delete "${group.name}"`;
+    note.textContent = blockedReason;
+    note.classList.toggle('hidden', !blockedReason);
+  }
+
+  function openGroupModal(group) {
     if (!groupModal) return;
-    groupNameInput.value = '';
+    editingGroupId = group ? group.id : null;
+
+    document.getElementById('group-modal-title').textContent = group ? 'Rename Group' : 'Create Group';
+    document.getElementById('group-modal-hint').textContent = group
+      ? 'Hosts stay in the group; only its name changes.'
+      : 'Groups keep the host tree tidy as your list grows.';
+    document.getElementById('btn-group-confirm').textContent = group ? 'Rename' : 'Create Group';
+
+    groupNameInput.value = group ? group.name : '';
     groupErrorEl.textContent = '';
+    updateGroupDeleteButton(group);
     groupModal.classList.remove('hidden');
-    setTimeout(() => groupNameInput.focus(), 0);
+    setTimeout(() => {
+      groupNameInput.focus();
+      groupNameInput.select();
+    }, 0);
   }
 
   function closeGroupModal() {
     if (!groupModal) return;
     groupModal.classList.add('hidden');
     groupErrorEl.textContent = '';
+    editingGroupId = null;
   }
 
   function openEditHostModal(host) {
@@ -560,7 +610,38 @@ window.onload = function() {
     }
   }
 
-  async function handleCreateGroup() {
+  async function handleDeleteGroup() {
+    if (!editingGroupId) return;
+    const groupId = editingGroupId;
+    const group = groups.find(g => g.id === groupId);
+    const label = group ? group.name : 'this group';
+
+    if (!window.confirm(`Delete the group "${label}"? This cannot be undone.`)) return;
+
+    const result = await window.electronAPI.deleteGroup(groupId);
+    if (!result || !result.ok) {
+      // The main process re-checks, so this covers a group that gained hosts
+      // in another window while the modal was open.
+      groupErrorEl.textContent = result && result.reason === 'has-hosts'
+        ? 'This group now has hosts under it and can no longer be deleted.'
+        : 'This group could not be deleted.';
+      if (result && result.store) {
+        groups = result.store.groups || groups;
+        updateGroupDeleteButton(groups.find(g => g.id === groupId));
+      }
+      return;
+    }
+
+    groups = result.store.groups || groups;
+    collapsedGroups.delete(groupId);
+    persistCollapsedGroups();
+    if (activeGroupFilter === groupId) activeGroupFilter = 'all';
+    refreshGroupSelectors();
+    closeGroupModal();
+    loadHosts(document.getElementById('search-input').value);
+  }
+
+  async function handleGroupSubmit() {
     if (!groupNameInput) return;
     const proposed = groupNameInput.value.trim();
 
@@ -570,10 +651,22 @@ window.onload = function() {
       return;
     }
 
-    const exists = groups.some(g => g.name.toLowerCase() === proposed.toLowerCase());
+    // A group may keep its own name; only clashes with *other* groups matter
+    const exists = groups.some(
+      g => g.id !== editingGroupId && g.name.toLowerCase() === proposed.toLowerCase()
+    );
     if (exists) {
       groupErrorEl.textContent = 'A group with this name already exists.';
       groupNameInput.focus();
+      return;
+    }
+
+    if (editingGroupId) {
+      const store = await window.electronAPI.renameGroup({ groupId: editingGroupId, name: proposed });
+      groups = store.groups || groups;
+      refreshGroupSelectors();
+      closeGroupModal();
+      loadHosts(document.getElementById('search-input').value);
       return;
     }
 
@@ -739,8 +832,14 @@ window.onload = function() {
       <span class="twisty">${ICONS.chevron}</span>
       <span class="group-icon">${ICONS.folder}</span>
       <span class="group-name" title="${escapeHtml(group.name)}">${escapeHtml(group.name)}</span>
+      <button class="rename-group-btn" title="Rename group" aria-label="Rename group">${ICONS.pencil}</button>
       <span class="group-count">${hosts.length}</span>
     `;
+
+    header.querySelector('.rename-group-btn').addEventListener('click', (e) => {
+      e.stopPropagation(); // don't collapse the group on the way through
+      openGroupModal(group);
+    });
 
     const toggle = () => {
       const nowCollapsed = !section.classList.contains('collapsed');
@@ -766,6 +865,9 @@ window.onload = function() {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveTreeFocus(header, -1);
+      } else if (e.key === 'F2') {
+        e.preventDefault();
+        openGroupModal(group);
       }
     });
 
@@ -829,7 +931,9 @@ window.onload = function() {
       return;
     }
 
-    if (filteredHosts.length === 0) {
+    // An empty *group* still gets rendered below, so its row stays reachable
+    // for renaming; only a fruitless search has nothing to show.
+    if (filteredHosts.length === 0 && searching) {
       container.innerHTML = '<div class="tree-empty"><strong>No matches</strong>Try a different search or group.</div>';
       updateToggleAllButton();
       return;
@@ -920,18 +1024,20 @@ window.onload = function() {
     updateToggleAllButton();
   });
 
-  document.getElementById('add-group-btn').addEventListener('click', openGroupModal);
+  // Wrapped, or the click event would be passed in as the group to rename
+  document.getElementById('add-group-btn').addEventListener('click', () => openGroupModal());
 
   document.getElementById('open-settings-btn').addEventListener('click', () => openSettingsTab());
 
   document.getElementById('save-auth').addEventListener('change', updateHostModalAuthUI);
 
   document.getElementById('btn-group-cancel').addEventListener('click', closeGroupModal);
-  document.getElementById('btn-group-confirm').addEventListener('click', handleCreateGroup);
+  document.getElementById('btn-group-confirm').addEventListener('click', handleGroupSubmit);
+  document.getElementById('btn-group-delete').addEventListener('click', handleDeleteGroup);
   groupNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleCreateGroup();
+      handleGroupSubmit();
     }
     if (e.key === 'Escape') {
       e.preventDefault();

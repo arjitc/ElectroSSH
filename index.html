@@ -277,8 +277,8 @@
   <div id="group-modal" class="modal-overlay hidden">
     <div class="modal-content" style="width: 340px;">
       <div class="modal-header">
-        <h3>Create Group</h3>
-        <p>Groups keep the host tree tidy as your list grows.</p>
+        <h3 id="group-modal-title">Create Group</h3>
+        <p id="group-modal-hint">Groups keep the host tree tidy as your list grows.</p>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -286,8 +286,11 @@
           <input type="text" id="group-name-input" placeholder="Production" autocomplete="off">
           <div id="group-error" class="form-error"></div>
         </div>
+        <div id="group-delete-note" class="field-note hidden"></div>
       </div>
       <div class="modal-actions">
+        <button id="btn-group-delete" class="btn btn-danger hidden">Delete</button>
+        <div class="spacer"></div>
         <button id="btn-group-cancel" class="btn">Cancel</button>
         <button id="btn-group-confirm" class="btn btn-primary">Create Group</button>
       </div>

@@ -11,6 +11,8 @@ What works:
 - [x] Editing Hosts
 - [X] Deleting Hosts
 - [X] Adding Groups/Categories
+- [x] Renaming Groups/Categories (pencil icon in the sidebar, or F2)
+- [x] Deleting Groups/Categories (only when the group has no hosts under it)
 - [x] Searching Hosts 
 - [X] SSH Keys
 - [X] Right click to paste (or Ctrl+Shift+V)
@@ -23,7 +25,6 @@ What works:
 
 What doesn't work/needs work (contributors welcome!):
 
-- [ ] Editing Group/Category Names
 - [ ] Encrypting passwords saved
 - [ ] Dark/Light Mode Themes
 - [ ] Auto save console log to file on connection
