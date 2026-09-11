@@ -1,0 +1,94 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+ElectroSSH is an Electron SSH client: `ssh2` for connections, `xterm.js` 6 for terminals. Plain JavaScript with no framework, bundler, or build step for development; addons load as UMD `<script>` tags straight from `node_modules`.
+
+## Commands
+
+```bash
+npm install          # required after pulling; a checkout once had the xterm addons missing
+npm start            # run the app
+npm run pack         # unpacked build via electron-builder
+npm run dist:win     # Windows installer + zip into dist/
+```
+
+There is no test runner, linter, or type checker configured. `node --check main.js renderer.js preload.js` catches syntax errors only: a renamed identifier still referenced elsewhere passes it and throws at runtime (this has happened), so grep for old names after a rename.
+
+## Architecture
+
+Three layers, with the security boundary between them (`contextIsolation: true`, `nodeIntegration: false`):
+
+- **`main.js`**: the Electron main process. Owns the window and app menu, every SSH connection, the JSON stores, host key verification, and the close/reload guards.
+- **`preload.js`**: exposes `window.electronAPI` via `contextBridge`. All renderer/main traffic goes through it, so a new IPC channel needs changes in all three files.
+- **`renderer.js`**: the entire UI inside one `window.onload` closure (no modules): host tree, tabs and terminals, dialogs, settings. `index.html` is static markup; `styles.css` holds design tokens in `:root`.
+
+**Sessions.** The renderer creates a `sessionId` and sends `ssh-connect`. `main.js` keeps `sessions[sessionId] = { conn, stream, size, appliedSize }` and streams back `ssh-data`, `ssh-status` and `ssh-error`. The renderer's `sessions[sessionId]` holds the `Terminal`, its addons, the tab element, the connection config, and `connected`.
+
+**Persistence.** In Electron's `userData`: `saved_hosts.json` (`{ hosts, groups }`), `ssh_keys.json`, and `known_hosts.json` (`{ hosts: { "host:port": { <keyType>: { key, fingerprint, addedAt } } } }`). In renderer `localStorage`: `electrossh.collapsedGroups`, `electrossh.sidebarWidth`, `electrossh.fontSize`. Saved passwords are stored in clear text (see README).
+
+**Window chrome.** `windowChromeMode()` uses `titleBarOverlay` on Windows, `hiddenInset` on macOS, and the native frame on Linux. The renderer fetches the mode over `window-chrome` and sets `body.frameless` plus `overlay-right`/`overlay-left`, which the CSS uses for drag regions and control spacing.
+
+## Constraints that are easy to break
+
+### xterm
+- Keep the `@xterm/*` packages to one release set: `xterm` 6.0.0 with `addon-fit` 0.11.0, `addon-webgl` 0.19.0, `addon-search` 0.16.0, `addon-web-links` 0.12.0. The addons declare a stale `^5` peer range, but their internals target core 6 (pairing webgl 0.19 with core 5.5 breaks `WebglAddon.dispose()`). When upgrading, match versions by npm publish date, not by peer range.
+- Search highlighting uses the decoration API, so terminals are created with `allowProposedApi: true`.
+- `addon-search` 0.16 records new options before checking whether they changed, so an options-only change never recounts. The match-case/regex toggles call `clearDecorations()` first to force a fresh pass.
+- `closeSession` disposes the WebGL addon and the terminal in separate `try` blocks, so a throwing addon can't leak the terminal.
+- A hidden terminal can't measure its font. Zoom applies to the visible terminal; `switchTab` applies the pending size before fitting.
+
+### SSH connection lifecycle (`ssh-connect` in `main.js`)
+- ssh2's `readyTimeout` is `0`, replaced by a handshake timer (`HANDSHAKE_TIMEOUT_MS`) that pauses while a host key prompt is open. ssh2's own timer counts the time a person spends reading the prompt.
+- On reconnect, the old connection's `end`/`close` events arrive after the new one has taken the same session id. Handlers act only when `isCurrent()` is true.
+- Resizes are never dropped. A `term-resize` that arrives before the shell exists is stored and applied by `applyWindowSize()` when the stream opens (dropping them made htop draw short). The renderer also re-syncs size on `Connected`.
+- ssh2 re-runs the host verifier on every rekey. `acceptedHostKey` stops "Connect Once" from prompting again mid-session.
+- Keepalive: `normalizeKeepalive()` exists in both `main.js` and `renderer.js`; keep them identical. Default 5s, `0` disables, max 3600.
+
+### Host keys
+- Trust-on-first-use, keyed per `host:port` and per key type. Statuses are `unknown`, `changed` (red warning) and `new-key-type` (amber, e.g. RSA to Ed25519 after an upgrade).
+- The key type string comes from the server and is used as a property name, so `describeHostKey()` restricts it to `[A-Za-z0-9@.+-]`. The raw key blob never goes to the renderer.
+- The renderer queues prompts across tabs, and focuses the dialog rather than a button so a stray Enter can't accept a key.
+
+### Links
+- Terminal output is written by the remote host. `open-external` in `main.js` opens only `http:`/`https:`, because `shell.openExternal` launches any registered protocol handler.
+- The window denies `window.open` (`setWindowOpenHandler`) and blocks `will-navigate`. OSC 8 hyperlinks go through the Terminal's `linkHandler`, whose hover text is the real target. Opening a link needs Ctrl+click (Cmd on macOS) because a plain click selects.
+
+### Keyboard
+- Plain Ctrl+C/V/F belong to the remote shell; the app uses Ctrl+Shift+C/V/F (Cmd on macOS).
+- Zoom and find are handled in a capture-phase `keydown` on `window`, so xterm never sees them; otherwise Ctrl+- would also send `^_`.
+- Menu accelerators fire only when xterm doesn't consume the key. With the terminal focused, Ctrl+W and Ctrl+R reach the shell; with focus elsewhere they hit the menu.
+- `SHORTCUT_GROUPS` in `renderer.js` is a hand-maintained reference rendered on the Settings > Keyboard Shortcuts page. Update it whenever a binding changes.
+
+### Closing and reloading
+- The window `close` handler asks while SSH sessions are open, which covers Ctrl+W, the title bar button, Alt+F4 and Quit. Reload and Force Reload are custom menu items that go through `reloadWindow()`, not the built-in roles. `did-start-loading` disconnects any sessions left by the page being replaced (a reload used to leave authenticated shells running).
+- `confirmSessionLoss()` shows an in-app dialog, which must acknowledge within `SESSION_LOSS_ACK_MS` (1.5s); otherwise a native dialog is used. The close path must never depend on the renderer alone, or a hung or crashed page makes the window impossible to close.
+- In the renderer, `askSessionLoss()` shows one question at a time; a new question replaces the old one, which resolves as Cancel. Closing a tab (`requestCloseSession`) asks only when `session.connected` is true.
+
+### Groups
+- `readHostStore()` re-creates the `default` group whenever it is missing, so it can't be deleted. `delete-group` refuses groups that still have hosts; this is enforced in `main.js`, not only by the disabled button.
+
+## Quirks
+
+- Working-tree files use CRLF (git autocrlf). Scripted string replacements must match `\r\n`.
+- `main.js` indents its IPC section as though it were nested, but it is module-level; functions declared there are callable from `createWindow`.
+
+## Verifying changes
+
+Nothing is checked into the repo, but these approaches have worked:
+
+- **Main-process logic:** stub `electron` through `Module._load`, `require` `main.js`, and call the captured `ipcMain` handlers directly. `ssh2` ships a `Server`, which gives a local SSH endpoint with a host key the test controls.
+- **End to end:** an Electron entry script that repoints `BrowserWindow.prototype.loadFile` at the project, `require`s `main.js`, and drives genuine input with `webContents.sendInputEvent`; this goes through menu accelerators the same way a real keypress does. Inspect state with `executeJavaScript`, and stub `dialog.showMessageBox` to answer native dialogs.
+- **Renderer only:** serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
+- After `forcefullyCrashRenderer()` and a window close with `window-all-closed` suppressed, the test's own event loop can stall. Report results before that point.
+
+## History
+
+The original app was built with Gemini. Since then (details in `git log`):
+
+- **UI:** redesigned UI with a collapsible host tree and a resizable sidebar; group rename and delete.
+- **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification.
+- **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
+- **Settings and safety:** keyboard shortcuts page; confirmation before closing or reloading the app, or closing a connected tab.
