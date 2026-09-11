@@ -2493,6 +2493,16 @@ window.onload = function() {
     }).catch(() => { /* fall back to the default framed layout */ });
   }
 
+  // Version beside the app name, from package.json
+  if (typeof window.electronAPI.getAppVersion === 'function') {
+    window.electronAPI.getAppVersion().then((version) => {
+      if (!version) return;
+      const label = document.getElementById('app-version');
+      label.textContent = `v${version}`;
+      label.classList.remove('hidden');
+    }).catch(() => { /* leave the label hidden */ });
+  }
+
   // initial load
   renderShortcutsPage();
   showSettingsPage('keys');

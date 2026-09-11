@@ -203,6 +203,16 @@ select {
   white-space: nowrap;
 }
 .brand svg { color: var(--accent); }
+/* Last in the row, so a narrow sidebar clips the version before the name */
+.brand-version {
+  margin-left: -2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.brand-version::before { content: '·'; margin-right: 6px; }
 
 .sidebar-search {
   position: relative;

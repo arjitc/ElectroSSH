@@ -443,6 +443,12 @@ async function reloadWindow(ignoreCache) {
 
 ipcMain.handle('window-chrome', () => windowChromeMode());
 
+// The version shown beside the app name, so bumping package.json is enough.
+// Read directly: app.getVersion() reports Electron's own version when the app
+// is started from another entry script, as the e2e tests do.
+const { version: APP_VERSION } = require('./package.json');
+ipcMain.handle('app-version', () => APP_VERSION);
+
 // Open a link from terminal output in the user's browser. That text is written
 // by the remote host, so only web URLs are allowed: shell.openExternal will
 // launch any registered protocol handler (file:, ms-msdt:, search-ms:, ...),

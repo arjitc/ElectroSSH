@@ -82,6 +82,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 - Working-tree files use CRLF (git autocrlf). Scripted string replacements must match `\r\n`.
 - `main.js` indents its IPC section as though it were nested, but it is module-level; functions declared there are callable from `createWindow`.
+- The version beside the app name in the sidebar comes from `package.json` (the `app-version` IPC channel), so a release only needs the bump there. `main.js` reads `package.json` itself because `app.getVersion()` reports Electron's version under the e2e harness.
 
 ## Verifying changes
 

@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Window chrome ('overlay-right', 'overlay-left' or 'native')
   getWindowChrome: () => ipcRenderer.invoke('window-chrome'),
 
+  // Version from package.json, shown beside the app name
+  getAppVersion: () => ipcRenderer.invoke('app-version'),
+
   // Host Management
   getHosts: () => ipcRenderer.invoke('get-hosts'),
   saveHost: (hostData) => ipcRenderer.invoke('save-host', hostData),
