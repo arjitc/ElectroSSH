@@ -403,9 +403,180 @@ window.onload = function() {
     return tab;
   }
 
-  function openSettingsTab() {
+  function openSettingsTab(page) {
     ensureSettingsTab();
     switchTab('settings');
+    if (page) showSettingsPage(page);
+  }
+
+  // -------------------------
+  // Settings pages
+  // -------------------------
+  const SETTINGS_PAGES = ['keys', 'shortcuts'];
+
+  function showSettingsPage(page) {
+    const target = SETTINGS_PAGES.includes(page) ? page : 'keys';
+    SETTINGS_PAGES.forEach((p) => {
+      const selected = p === target;
+      document.getElementById(`settings-page-${p}`).classList.toggle('active', selected);
+      const tab = document.getElementById(`settings-nav-${p}`);
+      tab.setAttribute('aria-selected', String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+  }
+
+  document.querySelectorAll('.settings-nav-item').forEach((tab) => {
+    tab.addEventListener('click', () => showSettingsPage(tab.dataset.page));
+    // Left/right move between pages, as in any tab strip
+    tab.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const i = SETTINGS_PAGES.indexOf(tab.dataset.page);
+      const next = SETTINGS_PAGES[(i + (e.key === 'ArrowRight' ? 1 : SETTINGS_PAGES.length - 1)) % SETTINGS_PAGES.length];
+      showSettingsPage(next);
+      document.getElementById(`settings-nav-${next}`).focus();
+    });
+  });
+
+  // -------------------------
+  // Keyboard shortcuts reference
+  // -------------------------
+  // One list, rendered into Settings. Each entry mirrors a real binding
+  // elsewhere in this file (or the app menu in main.js); keep them in step.
+  // A combo is an array of keys; an entry may list several alternatives.
+  // Keys in MOUSE_ACTIONS render as mouse actions rather than key caps.
+  const MOD = IS_MAC ? 'Cmd' : 'Ctrl';
+  const MOUSE_ACTIONS = new Set(['Click', 'Double-click', 'Right-click', 'Middle-click', 'Scroll up', 'Scroll down', 'Select text']);
+
+  const SHORTCUT_GROUPS = [
+    {
+      title: 'Terminal',
+      items: [
+        { action: 'Copy selection', combos: [IS_MAC ? ['Cmd', 'C'] : ['Ctrl', 'Shift', 'C'], ['Select text']] },
+        { action: 'Paste', combos: [IS_MAC ? ['Cmd', 'V'] : ['Ctrl', 'Shift', 'V'], ['Right-click']] },
+        { action: 'Open a link in your browser', combos: [[MOD, 'Click']], note: 'http and https links only' },
+        { action: 'Find in terminal', combos: [IS_MAC ? ['Cmd', 'F'] : ['Ctrl', 'Shift', 'F']] },
+        { action: 'Larger text', combos: [[MOD, '='], [MOD, 'Scroll up']] },
+        { action: 'Smaller text', combos: [[MOD, '-'], [MOD, 'Scroll down']] },
+        { action: 'Reset text size', combos: [[MOD, '0']] }
+      ],
+      footnote: IS_MAC
+        ? null
+        : 'Plain Ctrl+C, Ctrl+V and Ctrl+F go to the remote shell, so copy, paste and find add Shift.'
+    },
+    {
+      title: 'Find bar',
+      items: [
+        { action: 'Next match', combos: [['Enter']] },
+        { action: 'Previous match', combos: [['Shift', 'Enter']] },
+        { action: 'Close the find bar', combos: [['Esc']] }
+      ]
+    },
+    {
+      title: 'Host list',
+      items: [
+        { action: 'Connect to a host', combos: [['Double-click'], ['Enter']] },
+        { action: 'Move between hosts and groups', combos: [['↑'], ['↓']] },
+        { action: 'Expand or collapse a group', combos: [['→'], ['←']] },
+        { action: 'Rename a group', combos: [['F2']] },
+        { action: 'Clear the search box', combos: [['Esc']] }
+      ],
+      footnote: 'Click a host or group first to steer the list with the keyboard.'
+    },
+    {
+      title: 'Tabs and dialogs',
+      items: [
+        { action: 'Close a tab', combos: [['Middle-click']], note: 'On the tab itself' },
+        { action: 'Close or cancel a dialog', combos: [['Esc']] },
+        { action: 'Confirm a group name', combos: [['Enter']] }
+      ],
+      footnote: 'A host key prompt never accepts on Enter, so a stray keypress can\'t trust a key you haven\'t read.'
+    },
+    {
+      title: 'Application',
+      items: [
+        { action: 'Open Settings', combos: [[MOD, ',']] },
+        ...(IS_MAC ? [] : [
+          { action: 'Show the menu bar', combos: [['Alt']] },
+          { action: 'Full screen', combos: [['F11']], note: 'While the terminal isn\'t focused; there F11 goes to the shell' }
+        ])
+      ],
+      // Mirrors the close/reload confirmation in main.js
+      footnote: IS_MAC
+        ? 'Cmd+W closes the window and Cmd+R reloads the app. Both ask first while SSH sessions are open.'
+        : 'Outside the terminal, Ctrl+W closes the app and Ctrl+R reloads it. Both ask first while SSH sessions are open; inside the terminal those keys go to the shell.'
+    }
+  ];
+
+  function renderShortcutCombo(keys) {
+    const combo = document.createElement('span');
+    combo.className = 'shortcut-combo';
+    keys.forEach((key, i) => {
+      if (i > 0) {
+        const plus = document.createElement('span');
+        plus.className = 'plus';
+        plus.textContent = '+';
+        combo.appendChild(plus);
+      }
+      const kbd = document.createElement('kbd');
+      kbd.textContent = key;
+      if (MOUSE_ACTIONS.has(key)) kbd.className = 'mouse';
+      combo.appendChild(kbd);
+    });
+    return combo;
+  }
+
+  function renderShortcutsPage() {
+    const container = document.getElementById('shortcut-groups');
+    if (!container) return;
+    container.innerHTML = '';
+
+    SHORTCUT_GROUPS.forEach((group) => {
+      const section = document.createElement('section');
+      section.className = 'shortcut-group';
+      const heading = document.createElement('h4');
+      heading.textContent = group.title;
+      section.appendChild(heading);
+
+      group.items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'shortcut-row';
+
+        const action = document.createElement('div');
+        action.className = 'shortcut-action';
+        action.textContent = item.action;
+        if (item.note) {
+          const note = document.createElement('small');
+          note.textContent = item.note;
+          action.appendChild(note);
+        }
+
+        const keys = document.createElement('div');
+        keys.className = 'shortcut-keys';
+        item.combos.forEach((combo, i) => {
+          const el = renderShortcutCombo(combo);
+          if (i > 0) {
+            const or = document.createElement('span');
+            or.className = 'or';
+            or.textContent = 'or';
+            el.prepend(or);
+          }
+          keys.appendChild(el);
+        });
+
+        row.appendChild(action);
+        row.appendChild(keys);
+        section.appendChild(row);
+      });
+
+      if (group.footnote) {
+        const footnote = document.createElement('p');
+        footnote.className = 'shortcut-footnote';
+        footnote.textContent = group.footnote;
+        section.appendChild(footnote);
+      }
+      container.appendChild(section);
+    });
   }
 
   function closeSettingsTab() {
@@ -1919,6 +2090,98 @@ window.onload = function() {
     });
   }
 
+  // -------------------------
+  // Close / reload confirmation
+  // -------------------------
+  // main.js asks before closing or reloading while SSH sessions are open.
+  // Acknowledging straight away tells it this dialog is up; if it hears
+  // nothing it falls back to a native one, so a hung page can't trap the window.
+  const sessionLossModal = document.getElementById('session-loss-modal');
+  const SESSION_LOSS_LIST_LIMIT = 6;
+  let sessionLossRequestId = null;
+  let sessionLossReturnFocus = null;
+
+  function renderSessionLossPrompt({ action, sessionIds }) {
+    const reload = action === 'reload';
+    const count = sessionIds.length;
+    const sessionsText = `${count} open SSH session${count === 1 ? '' : 's'}`;
+    document.getElementById('session-loss-title').textContent = reload ? 'Reload ElectroSSH?' : 'Close ElectroSSH?';
+    document.getElementById('session-loss-lead').textContent = reload
+      ? `Reloading will disconnect ${sessionsText} and close ${count === 1 ? 'its tab' : 'their tabs'}.`
+      : `Closing will disconnect ${sessionsText}.`;
+    document.getElementById('btn-session-loss-confirm').textContent = reload ? 'Reload and Disconnect' : 'Close and Disconnect';
+
+    const list = document.getElementById('session-loss-list');
+    list.innerHTML = '';
+    const known = sessionIds.map((id) => sessions[id]).filter(Boolean);
+    known.slice(0, SESSION_LOSS_LIST_LIMIT).forEach((s) => {
+      const item = document.createElement('li');
+      const dot = document.createElement('span');
+      dot.className = 'status-dot';
+      const address = s.config
+        ? `${s.config.username ? s.config.username + '@' : ''}${s.config.host}:${s.config.port || 22}`
+        : '';
+      // A quick-connect tab is titled with its host, so the name would just
+      // repeat the address; show the address alone in that case.
+      const name = document.createElement('span');
+      name.className = 'session-name';
+      const titleIsHost = s.config && s.title === s.config.host;
+      name.textContent = titleIsHost ? address : s.title;
+      item.append(dot, name);
+      if (address && !titleIsHost) {
+        const addressEl = document.createElement('span');
+        addressEl.className = 'session-address';
+        addressEl.textContent = address;
+        item.appendChild(addressEl);
+      }
+      list.appendChild(item);
+    });
+    const hidden = count - Math.min(known.length, SESSION_LOSS_LIST_LIMIT);
+    if (hidden > 0) {
+      const more = document.createElement('li');
+      more.className = 'more';
+      more.textContent = `and ${hidden} more`;
+      list.appendChild(more);
+    }
+    list.classList.toggle('hidden', list.children.length === 0);
+  }
+
+  function closeSessionLossPrompt() {
+    sessionLossRequestId = null;
+    sessionLossModal.classList.add('hidden');
+    // Put focus back where it was (usually the terminal) after a Cancel
+    if (sessionLossReturnFocus && document.contains(sessionLossReturnFocus)) sessionLossReturnFocus.focus();
+    sessionLossReturnFocus = null;
+  }
+
+  function answerSessionLossPrompt(confirmed) {
+    if (!sessionLossRequestId) return;
+    window.electronAPI.respondSessionLossPrompt(sessionLossRequestId, confirmed);
+    closeSessionLossPrompt();
+  }
+
+  if (typeof window.electronAPI.onSessionLossPrompt === 'function') {
+    window.electronAPI.onSessionLossPrompt((request) => {
+      window.electronAPI.ackSessionLossPrompt(request.requestId);
+      if (!sessionLossRequestId) sessionLossReturnFocus = document.activeElement;
+      sessionLossRequestId = request.requestId;
+      renderSessionLossPrompt(request);
+      sessionLossModal.classList.remove('hidden');
+      // Cancel has focus, so Enter keeps everything open, as in the native dialog
+      setTimeout(() => document.getElementById('btn-session-loss-cancel').focus(), 0);
+    });
+
+    window.electronAPI.onSessionLossPromptCancel(({ requestId }) => {
+      if (requestId === sessionLossRequestId) closeSessionLossPrompt();
+    });
+  }
+
+  document.getElementById('btn-session-loss-cancel').addEventListener('click', () => answerSessionLossPrompt(false));
+  document.getElementById('btn-session-loss-confirm').addEventListener('click', () => answerSessionLossPrompt(true));
+  sessionLossModal.addEventListener('mousedown', (e) => {
+    if (e.target === sessionLossModal) answerSessionLossPrompt(false);
+  });
+
   document.getElementById('btn-host-key-accept').addEventListener('click', () => answerHostKeyPrompt('accept'));
   document.getElementById('btn-host-key-once').addEventListener('click', () => answerHostKeyPrompt('once'));
   document.getElementById('btn-host-key-reject').addEventListener('click', () => answerHostKeyPrompt('reject'));
@@ -1997,7 +2260,8 @@ window.onload = function() {
   };
 
   if (window.electronAPI.onOpenSettings) {
-    window.electronAPI.onOpenSettings(() => openSettingsTab());
+    // The Settings menu can ask for a specific page ('keys' or 'shortcuts')
+    window.electronAPI.onOpenSettings((page) => openSettingsTab(page));
   }
 
   document.getElementById('btn-add-existing-key').addEventListener('click', async () => {
@@ -2163,8 +2427,10 @@ window.onload = function() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    // The close/reload confirmation stacks on top of everything; Esc cancels
+    if (!sessionLossModal.classList.contains('hidden')) answerSessionLossPrompt(false);
     // A host key prompt sits above everything else; Esc means "don't trust it"
-    if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
+    else if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
     else if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
     else if (!groupModal.classList.contains('hidden')) closeGroupModal();
   });
@@ -2178,6 +2444,8 @@ window.onload = function() {
   }
 
   // initial load
+  renderShortcutsPage();
+  showSettingsPage('keys');
   syncClearSearchBtn();
   loadSSHKeys().finally(() => {
     updateQuickConnectAuthUI();

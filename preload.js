@@ -18,7 +18,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   respondHostKey: (payload) => ipcRenderer.send('host-key-response', payload),
 
   // Settings events
-  onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
+  onOpenSettings: (callback) => ipcRenderer.on('open-settings', (event, page) => callback(page)),
+
+  // "Close/reload and disconnect?" confirmation, shown in-app
+  onSessionLossPrompt: (callback) => ipcRenderer.on('session-loss-prompt', (event, args) => callback(args)),
+  onSessionLossPromptCancel: (callback) => ipcRenderer.on('session-loss-prompt-cancel', (event, args) => callback(args)),
+  ackSessionLossPrompt: (requestId) => ipcRenderer.send('session-loss-ack', { requestId }),
+  respondSessionLossPrompt: (requestId, confirmed) => ipcRenderer.send('session-loss-response', { requestId, confirmed }),
 
   // Links clicked in terminal output (http/https only, checked in main)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

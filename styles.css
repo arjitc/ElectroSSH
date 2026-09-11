@@ -997,3 +997,159 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   transition: opacity .15s, transform .15s;
 }
 .zoom-indicator.visible { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- Settings pages -------------------------------------------- */
+
+.settings-nav {
+  display: flex;
+  gap: 2px;
+  max-width: 620px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  align-self: flex-start;
+}
+.settings-nav-item {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background-color .12s, color .12s;
+}
+.settings-nav-item:hover { color: var(--text); background: var(--bg-hover); }
+.settings-nav-item[aria-selected="true"] { background: var(--bg-elevated); color: var(--text); box-shadow: var(--shadow-sm); }
+
+.settings-page { display: none; flex-direction: column; gap: 14px; }
+.settings-page.active { display: flex; }
+.settings-page-intro { margin: 0; color: var(--text-faint); font-size: 12px; }
+
+/* ---------- Keyboard shortcuts reference ------------------------------ */
+
+.shortcut-groups {
+  display: grid;
+  /* Two columns when there's room; one column no wider than the view when
+     a narrow window and a wide sidebar leave little space. */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: 14px;
+  max-width: 1000px;
+  align-items: start;
+}
+.shortcut-group {
+  padding: 14px 16px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.shortcut-group h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+
+.shortcut-row {
+  display: flex;
+  flex-wrap: wrap;          /* keys drop below the action when a card is narrow */
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.shortcut-row:first-of-type { border-top: none; }
+.shortcut-action { flex: 1 1 150px; min-width: 0; color: var(--text); padding-top: 2px; }
+.shortcut-action small { display: block; margin-top: 2px; color: var(--text-faint); font-size: 11px; }
+
+.shortcut-keys {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+}
+.shortcut-combo { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.shortcut-combo .or { margin-right: 4px; color: var(--text-faint); font-size: 11px; }
+.shortcut-combo .plus { color: var(--text-faint); font-size: 11px; }
+
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+}
+kbd.mouse { border-style: dashed; border-bottom-width: 1px; color: var(--text-dim); }
+
+.shortcut-footnote { margin: 8px 0 2px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+
+/* ---------- Close / reload confirmation ------------------------------- */
+
+.session-loss-dialog { width: 420px; }
+
+.session-loss-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.session-loss-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: rgba(210, 153, 34, .14);
+  color: var(--warn);
+}
+.session-loss-header p { font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
+
+.session-loss-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.session-loss-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  min-width: 0;
+}
+.session-loss-list .status-dot {
+  flex: none;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, .16);
+}
+.session-loss-list .session-name { font-weight: 500; color: var(--text); white-space: nowrap; }
+.session-loss-list .session-address {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.session-loss-list .more { justify-content: center; color: var(--text-faint); font-size: 12px; background: transparent; border-style: dashed; }
+
+/* A filled red button for the one action that ends sessions */
+.btn-danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn-danger-solid:hover { background: var(--danger-hover); border-color: var(--danger-hover); }

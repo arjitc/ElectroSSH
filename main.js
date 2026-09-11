@@ -317,7 +317,128 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
+  // Closing the window ends every SSH session, so ask first while any are
+  // open. This covers every way out: Ctrl+W, the title bar's close button,
+  // Alt+F4 and File > Quit all arrive here as a 'close' event.
+  let closeConfirmed = false;
+  let closePromptOpen = false;
+  mainWindow.on('close', (event) => {
+    if (closeConfirmed) return;
+    const open = Object.keys(sessions).length;
+    if (open === 0) return;
+
+    event.preventDefault();
+    if (closePromptOpen) return; // Ctrl+W pressed again while the prompt is up
+    closePromptOpen = true;
+    confirmSessionLoss(mainWindow, 'close', open).then((confirmed) => {
+      closePromptOpen = false;
+      if (!confirmed) {
+        quitRequested = false;
+        return;
+      }
+      closeConfirmed = true;
+      disconnectAllSessions();
+      if (quitRequested) app.quit();
+      else mainWindow.close();
+    });
+  });
+
+  // A page that starts loading has no tabs, so any SSH session still open
+  // belonged to the page it replaced. Without this, a reload (from the menu,
+  // from DevTools, or after a renderer crash) left authenticated shells
+  // running with nothing attached to them.
+  mainWindow.webContents.on('did-start-loading', () => disconnectAllSessions());
+
   mainWindow.loadFile('index.html');
+}
+
+// Set while the app is quitting, so a confirmed close finishes the quit
+// rather than only closing the window (which on macOS leaves the app running).
+let quitRequested = false;
+app.on('before-quit', () => { quitRequested = true; });
+
+// Ask before an action that disconnects open sessions. The question is shown
+// as an in-app dialog, styled like the rest of the app and able to name the
+// sessions at stake. The page must acknowledge the request promptly; if it
+// can't (crashed, hung, still loading), fall back to a native dialog so the
+// window can always be closed.
+const SESSION_LOSS_ACK_MS = 1500;
+const pendingSessionLossPrompts = new Map(); // requestId -> { acknowledge, answer }
+
+function confirmSessionLoss(win, action, count) {
+  if (!win || win.isDestroyed()) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const requestId = crypto.randomBytes(8).toString('hex');
+    let acknowledged = false;
+
+    const fallback = setTimeout(() => {
+      if (acknowledged) return;
+      pendingSessionLossPrompts.delete(requestId);
+      // In case the page does show its dialog late, don't leave it behind
+      if (!win.isDestroyed()) win.webContents.send('session-loss-prompt-cancel', { requestId });
+      nativeConfirmSessionLoss(win, action, count).then(resolve);
+    }, SESSION_LOSS_ACK_MS);
+
+    pendingSessionLossPrompts.set(requestId, {
+      acknowledge: () => {
+        acknowledged = true;
+        clearTimeout(fallback);
+      },
+      answer: (confirmed) => {
+        clearTimeout(fallback);
+        pendingSessionLossPrompts.delete(requestId);
+        resolve(confirmed);
+      }
+    });
+
+    win.webContents.send('session-loss-prompt', { requestId, action, sessionIds: Object.keys(sessions) });
+  });
+}
+
+ipcMain.on('session-loss-ack', (event, { requestId }) => {
+  const pending = pendingSessionLossPrompts.get(requestId);
+  if (pending) pending.acknowledge();
+});
+
+ipcMain.on('session-loss-response', (event, { requestId, confirmed }) => {
+  const pending = pendingSessionLossPrompts.get(requestId);
+  if (pending) pending.answer(confirmed === true);
+});
+
+// Native fallback for when the page can't show its own dialog.
+// Cancel is the default button, so a stray Enter keeps everything open.
+function nativeConfirmSessionLoss(win, action, count) {
+  const open = `${count} SSH session${count === 1 ? ' is' : 's are'} open`;
+  const copy = action === 'reload'
+    ? { title: 'Reload ElectroSSH', verb: 'Reload', detail: 'Reloading disconnects them and closes their tabs.' }
+    : { title: 'Close ElectroSSH', verb: 'Close', detail: 'Closing the app disconnects them.' };
+  return dialog.showMessageBox(win, {
+    type: 'warning',
+    title: copy.title,
+    message: `${copy.verb} ElectroSSH? ${open}.`,
+    detail: copy.detail,
+    buttons: [`${copy.verb} and Disconnect`, 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  }).then(({ response }) => response === 0);
+}
+
+// Reload replaces every terminal tab, so it asks first while sessions are open
+let reloadPromptOpen = false;
+async function reloadWindow(ignoreCache) {
+  if (!mainWindow || mainWindow.isDestroyed() || reloadPromptOpen) return;
+  const open = Object.keys(sessions).length;
+  if (open > 0) {
+    reloadPromptOpen = true;
+    const confirmed = await confirmSessionLoss(mainWindow, 'reload', open);
+    reloadPromptOpen = false;
+    if (!confirmed) return;
+  }
+  disconnectAllSessions();
+  if (ignoreCache) mainWindow.webContents.reloadIgnoringCache();
+  else mainWindow.webContents.reload();
 }
 
 ipcMain.handle('window-chrome', () => windowChromeMode());
@@ -391,8 +512,10 @@ function buildMenu() {
         {
           label: 'View',
           submenu: [
-            { role: 'reload' },
-            { role: 'forceReload' },
+            // Not the built-in roles: those reload instantly, and Ctrl+R pressed
+            // anywhere outside the terminal would wipe every open session.
+            { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => reloadWindow(false) },
+            { label: 'Force Reload', accelerator: 'CmdOrCtrl+Shift+R', click: () => reloadWindow(true) },
             { role: 'toggleDevTools' },
             { type: 'separator' },
             { role: 'togglefullscreen' }
@@ -416,7 +539,15 @@ function buildMenu() {
                 accelerator: 'CmdOrCtrl+,',
                 click: () => {
                   if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('open-settings');
+                    mainWindow.webContents.send('open-settings', 'keys');
+                  }
+                }
+              },
+              {
+                label: 'Keyboard Shortcuts',
+                click: () => {
+                  if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('open-settings', 'shortcuts');
                   }
                 }
               }
@@ -761,6 +892,22 @@ function buildMenu() {
           pending.resolve('reject');
           if (sender && !sender.isDestroyed()) sender.send('host-key-prompt-cancel', { requestId });
         }
+      }
+
+      // End every SSH connection. Used when the page that owns them is going
+      // away; the entry is removed first so each connection's close handler
+      // sees it is no longer current and stays quiet.
+      function disconnectAllSessions() {
+        Object.keys(sessions).forEach((sessionId) => {
+          const session = sessions[sessionId];
+          cancelHostKeyPrompts(sessionId, null);
+          delete sessions[sessionId];
+          try {
+            session.conn.end();
+          } catch (e) {
+            // already closed
+          }
+        });
       }
 
       ipcMain.on('host-key-response', (event, { requestId, decision }) => {

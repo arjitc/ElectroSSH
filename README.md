@@ -21,7 +21,9 @@ What works:
 - [x] Clickable links in terminal output: Ctrl+click (Cmd+click on macOS) opens http/https links in your browser
 - [x] Find in terminal: Ctrl+Shift+F (Cmd+F on macOS), with match case and regex options
 - [x] Terminal font size: Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+mouse wheel (remembered between sessions)
+- [x] Keyboard shortcuts reference in Settings (also under the Settings menu)
 - [x] Reconnect option when connection disconnects
+- [x] Closing or reloading the app asks for confirmation while SSH sessions are open
 - [x] SSH Keepalive for NAT/CGNAT users (per-host, defaults to every 5 seconds, set 0 to disable)
 - [x] Color supported in the console (for htop etc)
 - [x] Collapse/expand hosts listed under a Group/Category (state is remembered)
