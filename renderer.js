@@ -486,7 +486,7 @@ window.onload = function() {
     {
       title: 'Tabs and dialogs',
       items: [
-        { action: 'Close a tab', combos: [['Middle-click']], note: 'On the tab itself' },
+        { action: 'Close a tab', combos: [['Middle-click']], note: 'On the tab itself. Asks first while its session is connected' },
         { action: 'Close or cancel a dialog', combos: [['Esc']] },
         { action: 'Confirm a group name', combos: [['Enter']] }
       ],
@@ -1565,15 +1565,16 @@ window.onload = function() {
     tabEl.title = title;
     tabEl.innerHTML = `<span class="tab-dot"></span><span class="tab-label">${escapeHtml(title)}</span><span class="close-tab" title="Close">&times;</span>`;
 
+    // Both ask first while the session is still connected
     tabEl.onclick = (e) => {
-      if (e.target.closest('.close-tab')) closeSession(sessionId);
+      if (e.target.closest('.close-tab')) requestCloseSession(sessionId);
       else switchTab(sessionId);
     };
     // Middle-click closes the tab, as in a browser
     tabEl.addEventListener('auxclick', (e) => {
       if (e.button === 1) {
         e.preventDefault();
-        closeSession(sessionId);
+        requestCloseSession(sessionId);
       }
     });
     tabsStrip.appendChild(tabEl);
@@ -1942,9 +1943,13 @@ window.onload = function() {
     if (s) s.term.write(data);
   });
 
+  // Tracks whether a tab's session is live. Only a live one makes closing the
+  // tab ask first; a tab that is still connecting, or has dropped, just closes.
   function setTabConnected(sessionId, connected) {
     const s = sessions[sessionId];
-    if (s && s.tabEl) s.tabEl.classList.toggle('disconnected', !connected);
+    if (!s) return;
+    s.connected = connected;
+    if (s.tabEl) s.tabEl.classList.toggle('disconnected', !connected);
   }
 
   window.electronAPI.onStatus(({ sessionId, status, code, signal, hadError }) => {
@@ -2091,26 +2096,25 @@ window.onload = function() {
   }
 
   // -------------------------
-  // Close / reload confirmation
+  // "Disconnect?" confirmation
   // -------------------------
-  // main.js asks before closing or reloading while SSH sessions are open.
-  // Acknowledging straight away tells it this dialog is up; if it hears
-  // nothing it falls back to a native one, so a hung page can't trap the window.
+  // One dialog, two callers: main.js asks before closing or reloading the app
+  // while sessions are open, and a tab's close button asks before dropping a
+  // live session. Only one question is on screen at a time; if another
+  // arrives (Ctrl+W while the tab dialog is up), it replaces the first, which
+  // counts as Cancel.
   const sessionLossModal = document.getElementById('session-loss-modal');
   const SESSION_LOSS_LIST_LIMIT = 6;
-  let sessionLossRequestId = null;
+  let sessionLossPending = null;   // { resolve } for the question on screen
   let sessionLossReturnFocus = null;
 
-  function renderSessionLossPrompt({ action, sessionIds }) {
-    const reload = action === 'reload';
-    const count = sessionIds.length;
-    const sessionsText = `${count} open SSH session${count === 1 ? '' : 's'}`;
-    document.getElementById('session-loss-title').textContent = reload ? 'Reload ElectroSSH?' : 'Close ElectroSSH?';
-    document.getElementById('session-loss-lead').textContent = reload
-      ? `Reloading will disconnect ${sessionsText} and close ${count === 1 ? 'its tab' : 'their tabs'}.`
-      : `Closing will disconnect ${sessionsText}.`;
-    document.getElementById('btn-session-loss-confirm').textContent = reload ? 'Reload and Disconnect' : 'Close and Disconnect';
+  function sessionAddress(s) {
+    return s.config
+      ? `${s.config.username ? s.config.username + '@' : ''}${s.config.host}:${s.config.port || 22}`
+      : '';
+  }
 
+  function renderSessionLossList(sessionIds) {
     const list = document.getElementById('session-loss-list');
     list.innerHTML = '';
     const known = sessionIds.map((id) => sessions[id]).filter(Boolean);
@@ -2118,9 +2122,7 @@ window.onload = function() {
       const item = document.createElement('li');
       const dot = document.createElement('span');
       dot.className = 'status-dot';
-      const address = s.config
-        ? `${s.config.username ? s.config.username + '@' : ''}${s.config.host}:${s.config.port || 22}`
-        : '';
+      const address = sessionAddress(s);
       // A quick-connect tab is titled with its host, so the name would just
       // repeat the address; show the address alone in that case.
       const name = document.createElement('span');
@@ -2136,7 +2138,7 @@ window.onload = function() {
       }
       list.appendChild(item);
     });
-    const hidden = count - Math.min(known.length, SESSION_LOSS_LIST_LIMIT);
+    const hidden = sessionIds.length - Math.min(known.length, SESSION_LOSS_LIST_LIMIT);
     if (hidden > 0) {
       const more = document.createElement('li');
       more.className = 'more';
@@ -2146,40 +2148,88 @@ window.onload = function() {
     list.classList.toggle('hidden', list.children.length === 0);
   }
 
-  function closeSessionLossPrompt() {
-    sessionLossRequestId = null;
-    sessionLossModal.classList.add('hidden');
-    // Put focus back where it was (usually the terminal) after a Cancel
-    if (sessionLossReturnFocus && document.contains(sessionLossReturnFocus)) sessionLossReturnFocus.focus();
-    sessionLossReturnFocus = null;
-  }
+  // Resolves true for the confirm button, false for Cancel, Esc, a click
+  // outside, or being replaced by another question.
+  function askSessionLoss({ title, lead, confirmLabel, sessionIds }) {
+    return new Promise((resolve) => {
+      if (sessionLossPending) sessionLossPending.resolve(false);
+      else sessionLossReturnFocus = document.activeElement;
+      sessionLossPending = { resolve };
 
-  function answerSessionLossPrompt(confirmed) {
-    if (!sessionLossRequestId) return;
-    window.electronAPI.respondSessionLossPrompt(sessionLossRequestId, confirmed);
-    closeSessionLossPrompt();
-  }
-
-  if (typeof window.electronAPI.onSessionLossPrompt === 'function') {
-    window.electronAPI.onSessionLossPrompt((request) => {
-      window.electronAPI.ackSessionLossPrompt(request.requestId);
-      if (!sessionLossRequestId) sessionLossReturnFocus = document.activeElement;
-      sessionLossRequestId = request.requestId;
-      renderSessionLossPrompt(request);
+      document.getElementById('session-loss-title').textContent = title;
+      document.getElementById('session-loss-lead').textContent = lead;
+      document.getElementById('btn-session-loss-confirm').textContent = confirmLabel;
+      renderSessionLossList(sessionIds);
       sessionLossModal.classList.remove('hidden');
-      // Cancel has focus, so Enter keeps everything open, as in the native dialog
+      // Cancel has focus, so Enter keeps everything open
       setTimeout(() => document.getElementById('btn-session-loss-cancel').focus(), 0);
     });
+  }
 
+  function settleSessionLoss(confirmed) {
+    const pending = sessionLossPending;
+    if (!pending) return;
+    sessionLossPending = null;
+    sessionLossModal.classList.add('hidden');
+    // Put focus back where it was (usually the terminal); if that tab has just
+    // been closed, its element is gone and the check skips it
+    if (sessionLossReturnFocus && document.contains(sessionLossReturnFocus)) sessionLossReturnFocus.focus();
+    sessionLossReturnFocus = null;
+    pending.resolve(confirmed);
+  }
+
+  // --- asked by main.js: close or reload the whole app
+  // Acknowledging straight away tells main this dialog is up; if it hears
+  // nothing it falls back to a native one, so a hung page can't trap the window.
+  let appPromptRequestId = null;
+
+  if (typeof window.electronAPI.onSessionLossPrompt === 'function') {
+    window.electronAPI.onSessionLossPrompt(({ requestId, action, sessionIds }) => {
+      window.electronAPI.ackSessionLossPrompt(requestId);
+      appPromptRequestId = requestId;
+      const reload = action === 'reload';
+      const count = sessionIds.length;
+      const sessionsText = `${count} open SSH session${count === 1 ? '' : 's'}`;
+      askSessionLoss({
+        title: reload ? 'Reload ElectroSSH?' : 'Close ElectroSSH?',
+        lead: reload
+          ? `Reloading will disconnect ${sessionsText} and close ${count === 1 ? 'its tab' : 'their tabs'}.`
+          : `Closing will disconnect ${sessionsText}.`,
+        confirmLabel: reload ? 'Reload and Disconnect' : 'Close and Disconnect',
+        sessionIds
+      }).then((confirmed) => {
+        if (appPromptRequestId === requestId) appPromptRequestId = null;
+        window.electronAPI.respondSessionLossPrompt(requestId, confirmed);
+      });
+    });
+
+    // main gave up waiting and used its native dialog instead
     window.electronAPI.onSessionLossPromptCancel(({ requestId }) => {
-      if (requestId === sessionLossRequestId) closeSessionLossPrompt();
+      if (requestId === appPromptRequestId) settleSessionLoss(false);
     });
   }
 
-  document.getElementById('btn-session-loss-cancel').addEventListener('click', () => answerSessionLossPrompt(false));
-  document.getElementById('btn-session-loss-confirm').addEventListener('click', () => answerSessionLossPrompt(true));
+  // --- a tab's close button, while its session is still connected
+  async function requestCloseSession(sessionId) {
+    const s = sessions[sessionId];
+    if (!s) return;
+    if (!s.connected) {
+      closeSession(sessionId); // nothing live to lose
+      return;
+    }
+    const confirmed = await askSessionLoss({
+      title: 'Close this tab?',
+      lead: 'Its SSH session is still connected. Closing the tab will disconnect it.',
+      confirmLabel: 'Close and Disconnect',
+      sessionIds: [sessionId]
+    });
+    if (confirmed && sessions[sessionId]) closeSession(sessionId);
+  }
+
+  document.getElementById('btn-session-loss-cancel').addEventListener('click', () => settleSessionLoss(false));
+  document.getElementById('btn-session-loss-confirm').addEventListener('click', () => settleSessionLoss(true));
   sessionLossModal.addEventListener('mousedown', (e) => {
-    if (e.target === sessionLossModal) answerSessionLossPrompt(false);
+    if (e.target === sessionLossModal) settleSessionLoss(false);
   });
 
   document.getElementById('btn-host-key-accept').addEventListener('click', () => answerHostKeyPrompt('accept'));
@@ -2428,7 +2478,7 @@ window.onload = function() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     // The close/reload confirmation stacks on top of everything; Esc cancels
-    if (!sessionLossModal.classList.contains('hidden')) answerSessionLossPrompt(false);
+    if (!sessionLossModal.classList.contains('hidden')) settleSessionLoss(false);
     // A host key prompt sits above everything else; Esc means "don't trust it"
     else if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
     else if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
