@@ -1493,6 +1493,121 @@ window.onload = function() {
   });
 
   // -------------------------
+  // Host key verification
+  // -------------------------
+  // The main process asks before trusting a server key it hasn't seen, or one
+  // that differs from what was saved. Several tabs can be connecting at once,
+  // so prompts queue and are answered one at a time; [0] is the one on screen.
+  const hostKeyModal = document.getElementById('host-key-modal');
+  const hostKeyDialog = hostKeyModal.querySelector('.host-key-dialog');
+  const hostKeyQueue = [];
+
+  function hostKeyTarget(prompt) {
+    const s = sessions[prompt.sessionId];
+    const user = s && s.config && s.config.username ? `${s.config.username}@` : '';
+    const address = `${user}${prompt.host}:${prompt.port}`;
+    return s && s.title && s.title !== prompt.host ? `${s.title}  ·  ${address}` : address;
+  }
+
+  function renderHostKeyPrompt(prompt) {
+    const acceptBtn = document.getElementById('btn-host-key-accept');
+    const lead = document.getElementById('host-key-lead');
+    const title = document.getElementById('host-key-title');
+    const changed = prompt.status === 'changed';
+
+    hostKeyDialog.classList.toggle('is-changed', changed);
+    hostKeyDialog.classList.toggle('is-new-type', prompt.status === 'new-key-type');
+    document.getElementById('host-key-target').textContent = hostKeyTarget(prompt);
+    document.getElementById('host-key-type').textContent = prompt.keyType;
+    document.getElementById('host-key-fingerprint').textContent = prompt.fingerprint;
+
+    // A changed key shows both fingerprints, saved above presented
+    ['host-key-previous-label', 'host-key-previous'].forEach((id) => {
+      document.getElementById(id).classList.toggle('hidden', !changed);
+    });
+    document.getElementById('host-key-previous').textContent = changed ? prompt.previousFingerprint : '';
+    document.getElementById('host-key-fingerprint-label').textContent = changed ? 'New fingerprint' : 'Fingerprint';
+
+    if (changed) {
+      title.textContent = 'Warning: host key has changed';
+      lead.innerHTML = '<strong>The key this server presented does not match the one saved for it.</strong> '
+        + 'Someone could be intercepting your connection (a man-in-the-middle attack). This can also happen '
+        + 'if the server was reinstalled or its keys were rotated. Do not continue unless you know why the key changed.';
+      acceptBtn.textContent = 'Accept New Key';
+      acceptBtn.className = 'btn btn-danger';
+    } else if (prompt.status === 'new-key-type') {
+      const known = (prompt.knownKeyTypes || []).map(escapeHtml).join(', ');
+      title.textContent = 'New host key type';
+      lead.innerHTML = `This server is already known, but it presented a <strong>${escapeHtml(prompt.keyType)}</strong> key `
+        + `and only <strong>${known}</strong> is on record. This usually follows a server or client upgrade. `
+        + 'Verify the fingerprint before trusting it.';
+      acceptBtn.textContent = 'Accept & Save';
+      acceptBtn.className = 'btn btn-primary';
+    } else {
+      title.textContent = 'Verify host key';
+      lead.innerHTML = '<strong>ElectroSSH has no record of this server\'s key.</strong> '
+        + 'Compare the fingerprint with one from your server administrator or provider console. '
+        + 'Accept to save it; future connections will be checked against it.';
+      acceptBtn.textContent = 'Accept & Save';
+      acceptBtn.className = 'btn btn-primary';
+    }
+
+    const waiting = hostKeyQueue.length - 1;
+    const queueNote = document.getElementById('host-key-queue');
+    queueNote.textContent = waiting > 0 ? `${waiting} more host key${waiting === 1 ? '' : 's'} waiting after this one.` : '';
+    queueNote.classList.toggle('hidden', waiting <= 0);
+  }
+
+  function showNextHostKeyPrompt() {
+    const prompt = hostKeyQueue[0];
+    if (!prompt) {
+      hostKeyModal.classList.add('hidden');
+      return;
+    }
+    renderHostKeyPrompt(prompt);
+    // Bring the asking tab forward so it's obvious which connection this is
+    if (sessions[prompt.sessionId] && activeSessionId !== prompt.sessionId) switchTab(prompt.sessionId);
+    hostKeyModal.classList.remove('hidden');
+    // Focus the dialog rather than a button: the prompt can appear while
+    // someone is typing, and a stray Enter must not accept an unread key.
+    setTimeout(() => hostKeyDialog.focus(), 0);
+  }
+
+  function answerHostKeyPrompt(decision) {
+    const prompt = hostKeyQueue.shift();
+    if (!prompt) return;
+    window.electronAPI.respondHostKey({ requestId: prompt.requestId, decision });
+
+    const s = sessions[prompt.sessionId];
+    if (s && decision === 'accept') s.term.write('Host key accepted and saved.\r\n');
+    if (s && decision === 'once') s.term.write('Host key accepted for this connection only.\r\n');
+    showNextHostKeyPrompt();
+  }
+
+  if (typeof window.electronAPI.onHostKeyPrompt === 'function') {
+    window.electronAPI.onHostKeyPrompt((prompt) => {
+      hostKeyQueue.push(prompt);
+      const s = sessions[prompt.sessionId];
+      if (s) s.term.write('Waiting for you to verify the host key...\r\n');
+      if (hostKeyQueue.length === 1) showNextHostKeyPrompt();
+      else renderHostKeyPrompt(hostKeyQueue[0]); // refresh the "n more waiting" note
+    });
+
+    // The tab closed or the server gave up while the prompt was waiting
+    window.electronAPI.onHostKeyPromptCancel(({ requestId }) => {
+      const index = hostKeyQueue.findIndex((p) => p.requestId === requestId);
+      if (index === -1) return;
+      hostKeyQueue.splice(index, 1);
+      if (index === 0) showNextHostKeyPrompt();
+      else renderHostKeyPrompt(hostKeyQueue[0]);
+    });
+  }
+
+  document.getElementById('btn-host-key-accept').addEventListener('click', () => answerHostKeyPrompt('accept'));
+  document.getElementById('btn-host-key-once').addEventListener('click', () => answerHostKeyPrompt('once'));
+  document.getElementById('btn-host-key-reject').addEventListener('click', () => answerHostKeyPrompt('reject'));
+
+  // -------------------------
   // Connect UI
   // -------------------------
   function updateQuickConnectAuthUI() {
@@ -1731,7 +1846,9 @@ window.onload = function() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
+    // A host key prompt sits above everything else; Esc means "don't trust it"
+    if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
+    else if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
     else if (!groupModal.classList.contains('hidden')) closeGroupModal();
   });
 

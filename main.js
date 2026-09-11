@@ -3,12 +3,14 @@ const { execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { Client, utils: sshUtils } = require('ssh2');
 
 let mainWindow;
 const userDataPath = app.getPath('userData'); // Get a writable path
 const hostsFilePath = path.join(userDataPath, 'saved_hosts.json');
 const keysFilePath = path.join(userDataPath, 'ssh_keys.json');
+const knownHostsFilePath = path.join(userDataPath, 'known_hosts.json');
 
 console.log('Host data path:', hostsFilePath);
 // Store active sessions: { sessionId: { conn: Client, stream: Stream } }
@@ -81,6 +83,77 @@ function writeHostStore(store) {
   };
   
   fs.writeFileSync(hostsFilePath, JSON.stringify(cleanedStore, null, 2), 'utf-8');
+}
+
+// --- Known Hosts (host key verification) ---
+//
+// Trust-on-first-use, like PuTTY and OpenSSH: the first time we see a host we
+// ask the user to confirm its key, then check every later connection against
+// what was saved. Keys are stored per host *and* per key type, because a
+// server can legitimately hold several (RSA and Ed25519, say) and present a
+// different one after an upgrade, which is not the same as a key changing.
+//
+// Shape: { hosts: { "example.com:22": { "ssh-ed25519": { key, fingerprint, addedAt } } } }
+
+function readKnownHosts() {
+  try {
+    const data = JSON.parse(fs.readFileSync(knownHostsFilePath, 'utf-8'));
+    if (data && typeof data.hosts === 'object' && data.hosts !== null) return data;
+  } catch (e) {
+    // missing or unreadable: start from an empty store
+  }
+  return { hosts: {} };
+}
+
+function writeKnownHosts(store) {
+  fs.writeFileSync(knownHostsFilePath, JSON.stringify(store, null, 2), 'utf-8');
+}
+
+function knownHostId(host, port) {
+  return `${String(host || '').trim().toLowerCase()}:${parseInt(port, 10) || 22}`;
+}
+
+// The verifier receives the raw public key blob in SSH wire format, which
+// starts with a length-prefixed key type ("ssh-ed25519", "ssh-rsa", ...).
+// The fingerprint matches what OpenSSH and PuTTY display: SHA256, base64,
+// no padding.
+function describeHostKey(blob) {
+  let keyType = 'unknown';
+  if (blob.length >= 4) {
+    const len = blob.readUInt32BE(0);
+    if (len > 0 && len < 64 && blob.length >= 4 + len) {
+      const candidate = blob.toString('ascii', 4, 4 + len);
+      // The server chooses this string, and it is both shown to the user and
+      // used as a property name in the store. Real key types only use these
+      // characters (ssh-ed25519, ecdsa-sha2-nistp256, sk-ssh-ed25519@openssh.com).
+      if (/^[A-Za-z0-9@.+-]+$/.test(candidate)) keyType = candidate;
+    }
+  }
+  const fingerprint = 'SHA256:' + crypto.createHash('sha256').update(blob).digest('base64').replace(/=+$/, '');
+  return { keyType, fingerprint, key: blob.toString('base64') };
+}
+
+function classifyHostKey(store, hostId, info) {
+  const entry = store.hosts[hostId];
+  if (!entry || Object.keys(entry).length === 0) return { status: 'unknown' };
+
+  const stored = entry[info.keyType];
+  if (stored) {
+    if (stored.key === info.key) return { status: 'trusted' };
+    return { status: 'changed', previousFingerprint: stored.fingerprint };
+  }
+  return { status: 'new-key-type', knownKeyTypes: Object.keys(entry) };
+}
+
+function saveKnownHostKey(hostId, info) {
+  const store = readKnownHosts();
+  store.hosts[hostId] = store.hosts[hostId] || {};
+  store.hosts[hostId][info.keyType] = {
+    key: info.key,
+    fingerprint: info.fingerprint,
+    addedAt: new Date().toISOString()
+  };
+  writeKnownHosts(store);
 }
 
 // --- SSH Key Store Helpers ---
@@ -642,7 +715,37 @@ function buildMenu() {
         }
       }
       
+      // Host key prompts waiting on the user: requestId -> { sessionId, resolve }
+      const pendingHostKeyPrompts = new Map();
+
+      function promptHostKey(sender, payload) {
+        return new Promise((resolve) => {
+          const requestId = `${payload.sessionId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+          pendingHostKeyPrompts.set(requestId, { sessionId: payload.sessionId, resolve });
+          sender.send('host-key-prompt', { requestId, ...payload });
+        });
+      }
+
+      // Resolve any prompt for a session that is going away, and tell the
+      // renderer to take the dialog down.
+      function cancelHostKeyPrompts(sessionId, sender) {
+        for (const [requestId, pending] of pendingHostKeyPrompts) {
+          if (pending.sessionId !== sessionId) continue;
+          pendingHostKeyPrompts.delete(requestId);
+          pending.resolve('reject');
+          if (sender && !sender.isDestroyed()) sender.send('host-key-prompt-cancel', { requestId });
+        }
+      }
+
+      ipcMain.on('host-key-response', (event, { requestId, decision }) => {
+        const pending = pendingHostKeyPrompts.get(requestId);
+        if (!pending) return;
+        pendingHostKeyPrompts.delete(requestId);
+        pending.resolve(['accept', 'once'].includes(decision) ? decision : 'reject');
+      });
+
       ipcMain.on('ssh-disconnect', (event, sessionId) => {
+        cancelHostKeyPrompts(sessionId, event.sender);
         const session = sessions[sessionId];
         if (session && session.conn) {
           try {
@@ -654,16 +757,89 @@ function buildMenu() {
         }
       });
       
+      // ssh2's own readyTimeout covers the whole handshake, including the time
+      // a person spends reading a host key prompt, so it is disabled and this
+      // timer runs instead, paused while a prompt is open.
+      const HANDSHAKE_TIMEOUT_MS = 20000;
+
       ipcMain.on('ssh-connect', (event, { sessionId, config, size }) => {
         if (sessions[sessionId]) {
+          cancelHostKeyPrompts(sessionId, event.sender);
           sessions[sessionId].conn.end();
           delete sessions[sessionId];
         }
-        
+
         const conn = new Client();
         sessions[sessionId] = { id: sessionId, conn, stream: null, size: { ...size }, appliedSize: null };
 
+        // On reconnect the previous connection's end/close events arrive after
+        // this one has taken over the session id. Only the current connection
+        // may report status or tear the session down.
+        const isCurrent = () => Boolean(sessions[sessionId] && sessions[sessionId].conn === conn);
+
+        let handshakeTimer = null;
+        const clearHandshakeTimer = () => {
+          clearTimeout(handshakeTimer);
+          handshakeTimer = null;
+        };
+        const armHandshakeTimer = () => {
+          clearHandshakeTimer();
+          handshakeTimer = setTimeout(() => {
+            if (!isCurrent()) return;
+            event.sender.send('ssh-error', { sessionId, message: 'Timed out while waiting for handshake' });
+            conn.destroy();
+          }, HANDSHAKE_TIMEOUT_MS);
+        };
+
+        const hostId = knownHostId(config.host, config.port);
+        let acceptedHostKey = null;   // survives rekeys within this connection
+        let hostKeyRejected = false;
+
+        const hostVerifier = (keyBlob, verify) => {
+          const info = describeHostKey(keyBlob);
+
+          // ssh2 runs the verifier again on every rekey during a long session.
+          // The key this connection already accepted must not prompt again,
+          // or "Connect once" would re-ask an hour into the session.
+          if (acceptedHostKey && acceptedHostKey === info.key) {
+            verify(true);
+            return;
+          }
+
+          const verdict = classifyHostKey(readKnownHosts(), hostId, info);
+          if (verdict.status === 'trusted') {
+            acceptedHostKey = info.key;
+            verify(true);
+            return;
+          }
+
+          clearHandshakeTimer(); // a person is deciding now
+          promptHostKey(event.sender, {
+            sessionId,
+            host: config.host,
+            port: parseInt(config.port, 10) || 22,
+            keyType: info.keyType,
+            fingerprint: info.fingerprint,
+            ...verdict
+          }).then((decision) => {
+            if (!isCurrent()) {
+              verify(false);
+              return;
+            }
+            if (decision === 'accept' || decision === 'once') {
+              if (decision === 'accept') saveKnownHostKey(hostId, info);
+              acceptedHostKey = info.key;
+              armHandshakeTimer(); // the rest of the handshake is machine-paced again
+              verify(true);
+            } else {
+              hostKeyRejected = true;
+              verify(false);
+            }
+          });
+        };
+
         conn.on('ready', () => {
+          clearHandshakeTimer();
           event.sender.send('ssh-status', { sessionId, status: 'Connected' });
 
           // Open the shell at whatever size the terminal is *now*, which may
@@ -702,19 +878,31 @@ function buildMenu() {
         });
         
         conn.on('error', (err) => {
-          event.sender.send('ssh-error', { sessionId, message: err.message });
-          if (sessions[sessionId]) delete sessions[sessionId];
+          clearHandshakeTimer();
+          if (!isCurrent()) return;
+          cancelHostKeyPrompts(sessionId, event.sender);
+          const message = hostKeyRejected
+            ? 'Connection cancelled: the host key was not accepted.'
+            : err.message;
+          event.sender.send('ssh-error', { sessionId, message });
+          delete sessions[sessionId];
         });
-        
+
         conn.on('end', () => {
+          clearHandshakeTimer();
+          if (!isCurrent()) return;
+          cancelHostKeyPrompts(sessionId, event.sender);
           event.sender.send('ssh-status', { sessionId, status: 'Disconnected' });
-          if (sessions[sessionId]) delete sessions[sessionId];
+          delete sessions[sessionId];
         });
-        
+
         conn.on('close', (hadError) => {
-          // ensure renderer knows connection closed
+          clearHandshakeTimer();
+          if (!isCurrent()) return;
+          // e.g. the server's LoginGraceTime expired while the prompt was open
+          cancelHostKeyPrompts(sessionId, event.sender);
           event.sender.send('ssh-status', { sessionId, status: 'Closed', hadError });
-          if (sessions[sessionId]) delete sessions[sessionId];
+          delete sessions[sessionId];
         });
         
         try {
@@ -725,7 +913,9 @@ function buildMenu() {
             username: config.username,
             // ssh2 treats 0 as "no keepalives"
             keepaliveInterval: keepaliveSeconds * 1000,
-            keepaliveCountMax: 3 // Missed replies tolerated before disconnecting
+            keepaliveCountMax: 3, // Missed replies tolerated before disconnecting
+            hostVerifier,
+            readyTimeout: 0 // replaced by the pausable handshake timer above
           };
           
           if (config.authType === 'key' && config.privateKeyPath) {
@@ -759,10 +949,12 @@ function buildMenu() {
             connConfig.password = config.password;
           }
           
+          armHandshakeTimer();
           conn.connect(connConfig);
         } catch (error) {
+          clearHandshakeTimer();
           event.sender.send('ssh-error', { sessionId, message: error.message });
-          if (sessions[sessionId]) delete sessions[sessionId];
+          if (isCurrent()) delete sessions[sessionId];
         }
       });
       

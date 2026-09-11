@@ -297,6 +297,35 @@
     </div>
   </div>
 
+  <!-- Host Key Verification Modal -->
+  <div id="host-key-modal" class="modal-overlay hidden">
+    <div class="modal-content host-key-dialog" role="alertdialog" aria-modal="true"
+         aria-labelledby="host-key-title" aria-describedby="host-key-lead" tabindex="-1">
+      <div class="modal-header">
+        <h3 id="host-key-title">Verify host key</h3>
+        <p id="host-key-target"></p>
+      </div>
+      <div class="modal-body">
+        <div id="host-key-lead" class="host-key-lead"></div>
+        <dl class="host-key-details">
+          <dt>Key type</dt>
+          <dd id="host-key-type"></dd>
+          <dt id="host-key-previous-label" class="hidden">Saved fingerprint</dt>
+          <dd id="host-key-previous" class="hidden"></dd>
+          <dt id="host-key-fingerprint-label">Fingerprint</dt>
+          <dd id="host-key-fingerprint"></dd>
+        </dl>
+        <p id="host-key-queue" class="field-note hidden"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-host-key-reject" class="btn">Cancel</button>
+        <div class="spacer"></div>
+        <button id="btn-host-key-once" class="btn">Connect Once</button>
+        <button id="btn-host-key-accept" class="btn btn-primary">Accept &amp; Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="./renderer.js"></script>
 
 </body>

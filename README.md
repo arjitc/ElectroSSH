@@ -15,6 +15,7 @@ What works:
 - [x] Deleting Groups/Categories (only when the group has no hosts under it)
 - [x] Searching Hosts 
 - [X] SSH Keys
+- [x] Host key verification: asks before trusting a new server, and warns loudly if a known server's key changes
 - [X] Right click to paste (or Ctrl+Shift+V)
 - [x] Left click select to copy (or Ctrl+Shift+C)
 - [x] Reconnect option when connection disconnects

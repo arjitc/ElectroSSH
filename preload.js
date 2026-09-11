@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onError: (callback) => ipcRenderer.on('ssh-error', (event, args) => callback(args)),
   onStatus: (callback) => ipcRenderer.on('ssh-status', (event, args) => callback(args)),
 
+  // Host key verification
+  onHostKeyPrompt: (callback) => ipcRenderer.on('host-key-prompt', (event, args) => callback(args)),
+  onHostKeyPromptCancel: (callback) => ipcRenderer.on('host-key-prompt-cancel', (event, args) => callback(args)),
+  respondHostKey: (payload) => ipcRenderer.send('host-key-response', payload),
+
   // Settings events
   onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
 

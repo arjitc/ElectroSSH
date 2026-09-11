@@ -823,3 +823,61 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
 }
 
 #group-delete-note { margin: 2px 0 0; }
+
+/* ---------- Host key verification ------------------------------------- */
+
+.host-key-dialog { width: 480px; outline: none; }
+.host-key-dialog .modal-header p {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.host-key-lead {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.host-key-lead strong { color: var(--text); }
+
+.host-key-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 7px 14px;
+  margin: 0;
+  font-size: 12px;
+}
+.host-key-details dt { color: var(--text-faint); padding-top: 2px; }
+.host-key-details dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+  user-select: all; /* one click selects the whole fingerprint for comparing */
+}
+
+/* Key changed: this is the one that matters, so it looks like it */
+.host-key-dialog.is-changed { border-color: rgba(248, 81, 73, .55); }
+.host-key-dialog.is-changed #host-key-title { color: var(--danger); }
+.host-key-dialog.is-changed .host-key-lead {
+  border-color: rgba(248, 81, 73, .45);
+  background: rgba(248, 81, 73, .10);
+  color: #ffc9c5;
+}
+.host-key-dialog.is-changed .host-key-lead strong { color: #fff; }
+.host-key-dialog.is-changed #host-key-previous { color: var(--text-faint); text-decoration: line-through; }
+.host-key-dialog.is-changed #host-key-fingerprint { color: #ffb4b0; }
+
+/* New key type for a known host: worth a look, not an alarm */
+.host-key-dialog.is-new-type .host-key-lead {
+  border-color: rgba(210, 153, 34, .45);
+  background: rgba(210, 153, 34, .10);
+  color: #f0d9a6;
+}
