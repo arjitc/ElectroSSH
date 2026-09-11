@@ -310,10 +310,36 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(options);
 
+  // The app never opens windows or navigates away from index.html. Refuse
+  // both, so a link in terminal output (or xterm's own window.open fallback)
+  // can't turn into an Electron window pointed at an arbitrary URL. Links
+  // the user opens go to their browser via 'open-external' instead.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+
   mainWindow.loadFile('index.html');
 }
 
 ipcMain.handle('window-chrome', () => windowChromeMode());
+
+// Open a link from terminal output in the user's browser. That text is written
+// by the remote host, so only web URLs are allowed: shell.openExternal will
+// launch any registered protocol handler (file:, ms-msdt:, search-ms:, ...),
+// and several of those have been used to run code.
+const OPENABLE_PROTOCOLS = new Set(['http:', 'https:']);
+
+ipcMain.handle('open-external', async (event, rawUrl) => {
+  if (typeof rawUrl !== 'string' || rawUrl.length > 4096) return { ok: false, reason: 'invalid' };
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch (e) {
+    return { ok: false, reason: 'invalid' };
+  }
+  if (!OPENABLE_PROTOCOLS.has(url.protocol)) return { ok: false, reason: 'protocol' };
+  await shell.openExternal(url.href);
+  return { ok: true };
+});
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';

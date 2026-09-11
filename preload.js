@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings events
   onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
 
+  // Links clicked in terminal output (http/https only, checked in main)
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
   // Window chrome ('overlay-right', 'overlay-left' or 'native')
   getWindowChrome: () => ipcRenderer.invoke('window-chrome'),
 

@@ -18,6 +18,9 @@ What works:
 - [x] Host key verification: asks before trusting a new server, and warns loudly if a known server's key changes
 - [X] Right click to paste (or Ctrl+Shift+V)
 - [x] Left click select to copy (or Ctrl+Shift+C)
+- [x] Clickable links in terminal output: Ctrl+click (Cmd+click on macOS) opens http/https links in your browser
+- [x] Find in terminal: Ctrl+Shift+F (Cmd+F on macOS), with match case and regex options
+- [x] Terminal font size: Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+mouse wheel (remembered between sessions)
 - [x] Reconnect option when connection disconnects
 - [x] SSH Keepalive for NAT/CGNAT users (per-host, defaults to every 5 seconds, set 0 to disable)
 - [x] Color supported in the console (for htop etc)

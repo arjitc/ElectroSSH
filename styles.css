@@ -881,3 +881,119 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   background: rgba(210, 153, 34, .10);
   color: #f0d9a6;
 }
+
+/* ---------- Find in terminal ------------------------------------------ */
+
+.term-search {
+  position: absolute;
+  top: 8px;
+  right: 18px;           /* clear of the terminal's scrollbar */
+  /* Never wider than the terminal area: with a narrow window and a wide
+     sidebar the bar would otherwise spill out over the sidebar. */
+  max-width: calc(100% - 26px);
+  box-sizing: border-box;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+.term-search input {
+  flex: 0 1 190px;       /* the input gives up space first when cramped */
+  width: 190px;
+  min-width: 48px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  border-color: transparent;
+  background: var(--bg-input);
+}
+.term-search input.invalid { border-color: var(--danger); box-shadow: none; }
+.term-search-count {
+  /* Yields space before any button does when the terminal area is narrow */
+  flex: 0 1 64px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.term-search-count.none { color: var(--danger); }
+.term-search-toggle, .term-search-btn {
+  flex: none;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  transition: background-color .12s, color .12s, border-color .12s;
+}
+.term-search-toggle:hover, .term-search-btn:hover { background: var(--bg-hover); color: var(--text); }
+.term-search-toggle[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: rgba(76, 141, 255, .45);
+  color: var(--accent-hover);
+}
+.term-search-divider { flex: none; width: 1px; height: 16px; margin: 0 3px; background: var(--border-strong); }
+
+/* ---------- Link hover hint ------------------------------------------- */
+
+.link-hint {
+  position: fixed;
+  z-index: 900;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(520px, 70vw);
+  padding: 6px 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+.link-hint.visible { display: flex; }
+.link-hint-url {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-hint-action { font-size: 11px; color: var(--text-faint); }
+.link-hint.blocked .link-hint-action { color: var(--danger); }
+
+/* ---------- Zoom readout ---------------------------------------------- */
+
+.zoom-indicator {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 16;
+  transform: translate(-50%, -4px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s, transform .15s;
+}
+.zoom-indicator.visible { opacity: 1; transform: translate(-50%, 0); }

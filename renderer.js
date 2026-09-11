@@ -156,6 +156,100 @@ window.onload = function() {
   }
 
   // -------------------------
+  // Terminal font size (Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+wheel)
+  // -------------------------
+  const FONT_SIZE_KEY = 'electrossh.fontSize';
+  const DEFAULT_FONT_SIZE = 13;
+  const MIN_FONT_SIZE = 8;
+  const MAX_FONT_SIZE = 32;
+
+  let terminalFontSize = DEFAULT_FONT_SIZE;
+  try {
+    const stored = parseInt(localStorage.getItem(FONT_SIZE_KEY), 10);
+    if (stored >= MIN_FONT_SIZE && stored <= MAX_FONT_SIZE) terminalFontSize = stored;
+  } catch (e) {
+    // storage unavailable: use the default
+  }
+
+  let zoomIndicatorTimer = null;
+  function flashZoomIndicator(text) {
+    const el = document.getElementById('zoom-indicator');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.add('visible');
+    clearTimeout(zoomIndicatorTimer);
+    zoomIndicatorTimer = setTimeout(() => el.classList.remove('visible'), 900);
+  }
+
+  // One size for every terminal. Only the visible one is updated now: a hidden
+  // terminal can't measure its font, so the rest pick it up in switchTab.
+  function setTerminalFontSize(size) {
+    const next = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)));
+    if (next !== terminalFontSize) {
+      terminalFontSize = next;
+      try { localStorage.setItem(FONT_SIZE_KEY, String(next)); } catch (e) { /* not persisted */ }
+      const active = sessions[activeSessionId];
+      if (active) {
+        active.term.options.fontSize = next;
+        refitActiveTerminal(); // cols/rows change, and the remote pty must hear about it
+      }
+    }
+    const limit = next === MAX_FONT_SIZE ? ' (max)' : next === MIN_FONT_SIZE ? ' (min)' : '';
+    flashZoomIndicator(`Font size ${next}${limit}`);
+  }
+
+  // -------------------------
+  // Links in terminal output
+  // -------------------------
+  // A plain click selects text (and copies it), so opening a link takes
+  // Ctrl+click (Cmd+click on macOS), as in VS Code and Windows Terminal. The
+  // main process opens only http/https; this check just keeps the hint honest.
+  const LINK_MODIFIER_LABEL = IS_MAC ? 'Cmd' : 'Ctrl';
+
+  function isWebUrl(uri) {
+    try {
+      const { protocol } = new URL(uri);
+      return protocol === 'http:' || protocol === 'https:';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function showLinkHint(event, uri) {
+    const hint = document.getElementById('link-hint');
+    if (!hint) return;
+    const openable = isWebUrl(uri);
+    document.getElementById('link-hint-url').textContent = uri;
+    document.getElementById('link-hint-action').textContent = openable
+      ? `${LINK_MODIFIER_LABEL}+click to open in your browser`
+      : 'Only http and https links can be opened';
+    hint.classList.toggle('blocked', !openable);
+    hint.classList.add('visible');
+
+    // Keep it on screen, just below and right of the pointer
+    const gap = 14;
+    const rect = hint.getBoundingClientRect();
+    const x = Math.min(event.clientX + gap, window.innerWidth - rect.width - 8);
+    const y = event.clientY + gap + rect.height > window.innerHeight - 8
+      ? event.clientY - rect.height - gap
+      : event.clientY + gap;
+    hint.style.left = `${Math.max(8, x)}px`;
+    hint.style.top = `${Math.max(8, y)}px`;
+  }
+
+  function hideLinkHint() {
+    const hint = document.getElementById('link-hint');
+    if (hint) hint.classList.remove('visible');
+  }
+
+  function openTerminalLink(event, uri) {
+    if (!(IS_MAC ? event.metaKey : event.ctrlKey)) return;
+    if (!isWebUrl(uri)) return;
+    hideLinkHint();
+    window.electronAPI.openExternal(uri).catch((err) => console.warn('Could not open link', err));
+  }
+
+  // -------------------------
   // SSH Key helpers & Settings panel
   // -------------------------
   function getKeyById(id) {
@@ -326,6 +420,7 @@ window.onload = function() {
     } else {
       activeSessionId = null;
       document.getElementById('connect-form').classList.remove('hidden');
+      closeFind();
     }
   }
 
@@ -1177,15 +1272,40 @@ window.onload = function() {
       cursorBlink: true,
       scrollback: 10000,
       fontFamily: "'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace",
-      fontSize: 13,
+      fontSize: terminalFontSize,
       lineHeight: 1.2,
       drawBoldTextInBrightColors: false,
       macOptionIsMeta: true,
-      theme: TERMINAL_THEME
+      theme: TERMINAL_THEME,
+      // The search addon highlights every match with xterm's decoration API,
+      // which is gated behind this flag. The addon ships in lockstep with the
+      // core, so the "proposed" API it relies on can't drift out from under it.
+      allowProposedApi: true,
+      // OSC 8 hyperlinks (ls --hyperlink, compiler output). Without this,
+      // xterm falls back to confirm() + window.open(). The text passed here is
+      // the link's real target, which can differ from what's displayed.
+      linkHandler: {
+        activate: (event, uri) => openTerminalLink(event, uri),
+        hover: (event, uri) => showLinkHint(event, uri),
+        leave: () => hideLinkHint(),
+        allowNonHttpProtocols: false
+      }
     });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(termHost);
+
+    // Plain URLs in the output become Ctrl+clickable
+    term.loadAddon(new WebLinksAddon.WebLinksAddon(
+      (event, uri) => openTerminalLink(event, uri),
+      { hover: (event, uri) => showLinkHint(event, uri), leave: () => hideLinkHint() }
+    ));
+
+    const searchAddon = new SearchAddon.SearchAddon();
+    term.loadAddon(searchAddon);
+    searchAddon.onDidChangeResults((result) => {
+      if (sessionId === activeSessionId) renderSearchCount(result);
+    });
 
     // The WebGL renderer is much faster, but its context can be lost (GPU
     // reset, driver update). When that happens we drop it and let xterm fall
@@ -1207,7 +1327,7 @@ window.onload = function() {
 
     // Save session (with bannerEl placeholder)
     sessions[sessionId] = {
-      term, fitAddon, webglAddon, container: termContainer, termHost, title,
+      term, fitAddon, webglAddon, searchAddon, container: termContainer, termHost, title,
       bannerEl: null, tabEl: null, config: config || null, hostId
     };
 
@@ -1341,6 +1461,7 @@ window.onload = function() {
       document.querySelectorAll('.terminal-instance').forEach(el => el.classList.remove('active'));
       document.getElementById('connect-form').classList.add('hidden');
       if (settingsView) settingsView.classList.add('visible');
+      closeFind();
       return;
     }
 
@@ -1353,6 +1474,11 @@ window.onload = function() {
       session.container.classList.add('active');
       document.getElementById('connect-form').classList.add('hidden');
       setTimeout(() => {
+        if (sessions[sessionId] !== session) return; // closed in the meantime
+        // Pick up a zoom change made while this terminal was hidden
+        if (session.term.options.fontSize !== terminalFontSize) {
+          session.term.options.fontSize = terminalFontSize;
+        }
         session.fitAddon.fit();
         window.electronAPI.resizeTerm({
           sessionId,
@@ -1361,6 +1487,7 @@ window.onload = function() {
         });
       }, 100);
     }
+    onActiveTerminalChanged();
   }
 
   function closeSession(sessionId) {
@@ -1395,6 +1522,7 @@ window.onload = function() {
     } else {
       activeSessionId = null;
       document.getElementById('connect-form').classList.remove('hidden');
+      closeFind();
     }
   }
 
@@ -1446,6 +1574,194 @@ window.onload = function() {
     new ResizeObserver(refitActiveTerminal).observe(document.getElementById('terminals-wrapper'));
   }
   window.addEventListener('resize', refitActiveTerminal);
+
+  // -------------------------
+  // Find in terminal (Ctrl+Shift+F, or Cmd+F on macOS)
+  // -------------------------
+  // One bar, always searching whichever terminal is visible. Plain Ctrl+F is
+  // left alone: in a shell it's readline's "forward one character".
+  const findBar = document.getElementById('term-search');
+  const findInput = document.getElementById('term-search-input');
+  const findCount = document.getElementById('term-search-count');
+  const findOptions = { caseSensitive: false, regex: false };
+
+  // Decoration colours must be #RRGGBB, so these are pre-blended dark tones
+  // rather than translucent overlays.
+  const FIND_DECORATIONS = {
+    matchBackground: '#1d3557',
+    matchBorder: '#3b6fc4',
+    matchOverviewRuler: '#4c8dff',
+    activeMatchBackground: '#6b4a0c',
+    activeMatchBorder: '#e3b341',
+    activeMatchColorOverviewRuler: '#e3b341'
+  };
+  // The addon stops counting at its highlight limit
+  const FIND_RESULT_LIMIT = 1000;
+
+  function isFindOpen() {
+    return !findBar.classList.contains('hidden');
+  }
+
+  function renderSearchCount({ resultIndex, resultCount }) {
+    const hasQuery = findInput.value.length > 0;
+    findCount.classList.toggle('none', hasQuery && resultCount === 0);
+    if (!hasQuery) {
+      findCount.textContent = '';
+    } else if (resultCount === 0) {
+      findCount.textContent = 'No results';
+    } else {
+      const total = resultCount >= FIND_RESULT_LIMIT ? `${FIND_RESULT_LIMIT}+` : String(resultCount);
+      findCount.textContent = resultIndex >= 0 ? `${resultIndex + 1} of ${total}` : `${total} matches`;
+    }
+  }
+
+  function clearFindHighlights(exceptSessionId) {
+    Object.entries(sessions).forEach(([id, s]) => {
+      if (id !== exceptSessionId && s.searchAddon) s.searchAddon.clearDecorations();
+    });
+  }
+
+  function runFind(direction = 'next', incremental = false) {
+    const s = sessions[activeSessionId];
+    if (!s) return;
+    const query = findInput.value;
+    findInput.classList.remove('invalid');
+
+    if (!query) {
+      s.searchAddon.clearDecorations();
+      renderSearchCount({ resultIndex: -1, resultCount: 0 });
+      return;
+    }
+    // The addon builds a RegExp from the query and would throw on a bad one
+    if (findOptions.regex) {
+      try {
+        new RegExp(query);
+      } catch (e) {
+        findInput.classList.add('invalid');
+        s.searchAddon.clearDecorations();
+        findCount.textContent = 'Invalid regex';
+        findCount.classList.add('none');
+        return;
+      }
+    }
+
+    const options = { ...findOptions, incremental, decorations: FIND_DECORATIONS };
+    const found = direction === 'prev'
+      ? s.searchAddon.findPrevious(query, options)
+      : s.searchAddon.findNext(query, options);
+    if (!found) renderSearchCount({ resultIndex: -1, resultCount: 0 });
+  }
+
+  function openFind() {
+    const s = sessions[activeSessionId];
+    if (!s) return;
+    findBar.classList.remove('hidden');
+    // Seed with a one-line selection, the way editors do
+    const selection = s.term.getSelection();
+    if (selection && !selection.includes('\n') && selection.length <= 200) findInput.value = selection;
+    findInput.focus();
+    findInput.select();
+    if (findInput.value) runFind('next', true);
+  }
+
+  function closeFind() {
+    if (!isFindOpen()) return;
+    findBar.classList.add('hidden');
+    findInput.classList.remove('invalid');
+    clearFindHighlights();
+    findCount.textContent = '';
+    const s = sessions[activeSessionId];
+    if (s) s.term.focus();
+  }
+
+  // Called when the visible terminal changes
+  function onActiveTerminalChanged() {
+    if (!isFindOpen()) return;
+    if (!sessions[activeSessionId]) {
+      closeFind();
+      return;
+    }
+    clearFindHighlights(activeSessionId);
+    runFind('next', true);
+  }
+
+  findInput.addEventListener('input', () => runFind('next', true));
+  findInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runFind(e.shiftKey ? 'prev' : 'next');
+    } else if (e.key === 'Escape') {
+      // Only from the find box: Esc inside the terminal belongs to the shell
+      e.preventDefault();
+      e.stopPropagation();
+      closeFind();
+    }
+  });
+  document.getElementById('term-search-next').addEventListener('click', () => runFind('next'));
+  document.getElementById('term-search-prev').addEventListener('click', () => runFind('prev'));
+  document.getElementById('term-search-close').addEventListener('click', closeFind);
+
+  [['term-search-case', 'caseSensitive'], ['term-search-regex', 'regex']].forEach(([id, option]) => {
+    const btn = document.getElementById(id);
+    btn.addEventListener('click', () => {
+      findOptions[option] = !findOptions[option];
+      btn.setAttribute('aria-pressed', String(findOptions[option]));
+      // addon-search 0.16 records the new options before checking whether
+      // they changed, so an options-only change never re-highlights or
+      // recounts. Clearing drops its cached term and forces a fresh pass.
+      const s = sessions[activeSessionId];
+      if (s) s.searchAddon.clearDecorations();
+      runFind('next', true);
+      findInput.focus();
+    });
+  });
+
+  // -------------------------
+  // Terminal-wide shortcuts: find and zoom
+  // -------------------------
+  // Handled in the capture phase so xterm never sees them; otherwise Ctrl+-
+  // would also reach the shell as ^_.
+  window.addEventListener('keydown', (e) => {
+    const mod = IS_MAC ? (e.metaKey && !e.ctrlKey) : (e.ctrlKey && !e.metaKey);
+    if (!mod || e.altKey) return;
+    const key = e.key;
+
+    if (key.toLowerCase() === 'f' && (IS_MAC || e.shiftKey)) {
+      // Don't pull focus out from under an open dialog
+      if (!sessions[activeSessionId] || document.querySelector('.modal-overlay:not(.hidden)')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openFind();
+      return;
+    }
+
+    if (key === '=' || key === '+' || e.code === 'NumpadAdd') {
+      setTerminalFontSize(terminalFontSize + 1);
+    } else if (key === '-' || key === '_' || e.code === 'NumpadSubtract') {
+      setTerminalFontSize(terminalFontSize - 1);
+    } else if (key === '0' || e.code === 'Numpad0') {
+      setTerminalFontSize(DEFAULT_FONT_SIZE);
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  // Ctrl+wheel zooms too. Trackpads send many small deltas, so step once per
+  // mouse-notch's worth of movement. On macOS a pinch arrives as ctrl+wheel.
+  let zoomWheelDelta = 0;
+  document.getElementById('terminals-wrapper').addEventListener('wheel', (e) => {
+    const zooming = IS_MAC ? (e.metaKey || e.ctrlKey) : e.ctrlKey;
+    if (!zooming) return;
+    e.preventDefault();
+    e.stopPropagation();
+    zoomWheelDelta += e.deltaY;
+    if (Math.abs(zoomWheelDelta) >= 60) {
+      setTerminalFontSize(terminalFontSize + (zoomWheelDelta < 0 ? 1 : -1));
+      zoomWheelDelta = 0;
+    }
+  }, { passive: false, capture: true });
 
   // -------------------------
   // IPC Listeners from main
@@ -1677,6 +1993,7 @@ window.onload = function() {
     if (settingsView) settingsView.classList.remove('visible');
     document.getElementById('connect-form').classList.remove('hidden');
     activeSessionId = null;
+    closeFind();
   };
 
   if (window.electronAPI.onOpenSettings) {

@@ -10,6 +10,8 @@
   <script src="./node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="./node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="./node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
+  <script src="./node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+  <script src="./node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 </head>
 <body>
 
@@ -96,6 +98,28 @@
 
       <div id="terminals-wrapper">
         <!-- Terminal instances populated by renderer.js -->
+
+        <!-- Find in terminal (Ctrl+Shift+F) -->
+        <div id="term-search" class="term-search hidden" role="search">
+          <input id="term-search-input" type="text" placeholder="Find" aria-label="Find in terminal"
+                 spellcheck="false" autocomplete="off">
+          <span id="term-search-count" class="term-search-count" aria-live="polite"></span>
+          <button id="term-search-case" class="term-search-toggle" title="Match case" aria-pressed="false">Aa</button>
+          <button id="term-search-regex" class="term-search-toggle" title="Use regular expression" aria-pressed="false">.*</button>
+          <span class="term-search-divider"></span>
+          <button id="term-search-prev" class="term-search-btn" title="Previous match (Shift+Enter)" aria-label="Previous match">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>
+          </button>
+          <button id="term-search-next" class="term-search-btn" title="Next match (Enter)" aria-label="Next match">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+          </button>
+          <button id="term-search-close" class="term-search-btn" title="Close (Esc)" aria-label="Close find">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          </button>
+        </div>
+
+        <!-- Brief "font size" readout shown while zooming -->
+        <div id="zoom-indicator" class="zoom-indicator" aria-live="polite"></div>
 
         <!-- Quick Connect -->
         <div id="connect-form">
@@ -295,6 +319,12 @@
         <button id="btn-group-confirm" class="btn btn-primary">Create Group</button>
       </div>
     </div>
+  </div>
+
+  <!-- Hover hint for links in terminal output: shows the real destination -->
+  <div id="link-hint" class="link-hint" role="tooltip">
+    <span id="link-hint-url" class="link-hint-url"></span>
+    <span id="link-hint-action" class="link-hint-action"></span>
   </div>
 
   <!-- Host Key Verification Modal -->
