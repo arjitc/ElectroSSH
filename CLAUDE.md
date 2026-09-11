@@ -13,9 +13,17 @@ npm install          # required after pulling; a checkout once had the xterm add
 npm start            # run the app
 npm run pack         # unpacked build via electron-builder
 npm run dist:win     # Windows installer + zip into dist/
+
+npm test             # main-process tests, ~3s (node --test, no extra dependencies)
+npm run test:slow    # the handshake-timeout test, ~25s
+npm run test:e2e     # drives the real app in Electron; opens its window briefly per file
+npm run test:all     # all three
+
+node --test test/main/host-keys.test.js           # one main-process file
+node test/e2e/run.js test/e2e/tab-close.e2e.js    # one e2e file
 ```
 
-There is no test runner, linter, or type checker configured. `node --check main.js renderer.js preload.js` catches syntax errors only: a renamed identifier still referenced elsewhere passes it and throws at runtime (this has happened), so grep for old names after a rename.
+There is no linter or type checker. `node --check main.js renderer.js preload.js` catches syntax errors only: a renamed identifier still referenced elsewhere passes it and throws at runtime (this has happened), so grep for old names after a rename.
 
 ## Architecture
 
@@ -77,12 +85,18 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ## Verifying changes
 
-Nothing is checked into the repo, but these approaches have worked:
+- **`test/main/`** (`npm test`): `test/helpers/main-harness.js` stubs `electron` through `Module._load`, loads a fresh `main.js` against a temporary `userData`, and calls the captured `ipcMain` handlers directly. `test/helpers/ssh-server.js` wraps ssh2's `Server` as a local SSH endpoint with a host key the test controls, and records pty sizes and window changes.
+- **`test/e2e/`** (`npm run test:e2e`): `run.js` starts one Electron process per `*.e2e.js` file. `harness.js` repoints `BrowserWindow.prototype.loadFile` at the project, loads `main.js`, drives the page with `webContents.sendInputEvent`, inspects it with `executeJavaScript`, and scripts `dialog.showMessageBox`. Each check prints as soon as it's known, so a hung file shows how far it got.
+- **Checking that a test catches a bug:** set `ELECTROSSH_MAIN` to another build of `main.js` (e.g. one taken from an older commit), saved in the project root so it finds `preload.js`. Both harnesses load it instead of `main.js`.
 
-- **Main-process logic:** stub `electron` through `Module._load`, `require` `main.js`, and call the captured `ipcMain` handlers directly. `ssh2` ships a `Server`, which gives a local SSH endpoint with a host key the test controls.
-- **End to end:** an Electron entry script that repoints `BrowserWindow.prototype.loadFile` at the project, `require`s `main.js`, and drives genuine input with `webContents.sendInputEvent`; this goes through menu accelerators the same way a real keypress does. Inspect state with `executeJavaScript`, and stub `dialog.showMessageBox` to answer native dialogs.
-- **Renderer only:** serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
-- After `forcefullyCrashRenderer()` and a window close with `window-all-closed` suppressed, the test's own event loop can stall. Report results before that point.
+Limits of synthetic input in the e2e tests:
+
+- Keys and clicks aimed at the page are reliable. Keys that only work by reaching the application menu (Ctrl+W/Ctrl+R with focus outside the terminal) are not delivered consistently, so tests trigger the menu item or `win.close()` directly and assert the accelerator strings separately.
+- Pointer moves from `sendInputEvent` don't reach xterm's link hover detection; `links.e2e.js` dispatches a DOM `mousemove` instead. Clicks do work.
+- `executeJavaScript` on a destroyed webContents never settles. The harness's `js()` refuses up front and times out.
+- With no windows left, the test process's event loop can stall, e.g. after `forcefullyCrashRenderer()` and a window close. The harness keeps a hidden spare window. `app.quit()` closes that spare too, so quitting tests call `keepAlive()` to put it back.
+
+**Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
 
 ## History
 

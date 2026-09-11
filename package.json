@@ -1,13 +1,17 @@
 {
   "name": "electrossh",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "ElectroSSH",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:win": "electron-builder --win --x64"
+    "dist:win": "electron-builder --win --x64",
+    "test": "node --test test/main/*.test.js",
+    "test:slow": "node --test test/slow/*.test.js",
+    "test:e2e": "node test/e2e/run.js",
+    "test:all": "npm test && npm run test:slow && npm run test:e2e"
   },
   "keywords": [],
   "author": "",

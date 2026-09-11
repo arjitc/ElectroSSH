@@ -69,6 +69,17 @@ and then,
 npm start
 ```
 
+## Running the tests
+
+```
+npm test            # main-process tests (a few seconds)
+npm run test:slow   # the handshake-timeout test (about 25 seconds)
+npm run test:e2e    # end-to-end tests; the app window opens briefly for each file
+npm run test:all    # everything
+```
+
+The tests run against local SSH servers they start themselves, so no network access or real host is needed.
+
 ## Screenshots
 
 ### Interface on first load
