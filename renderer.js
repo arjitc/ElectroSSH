@@ -10,6 +10,7 @@ window.onload = function() {
   let defaultKeyId = null;
   let defaultSSHDir = '';
   let selectedHostId = null;
+  let recentConnections = null; // the home view's list; null until first loaded
 
   // Seconds between SSH keepalive packets; 0 disables them. Mirrors main.js.
   const DEFAULT_KEEPALIVE = 5;
@@ -42,7 +43,10 @@ window.onload = function() {
     chevron: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 10.5 8l-5 4.5"/></svg>',
     folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.8 12.5v-8a1 1 0 0 1 1-1h3l1.4 1.6h5a1 1 0 0 1 1 1v6.4a1 1 0 0 1-1 1h-9.4a1 1 0 0 1-1-1Z"/></svg>',
     play: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5 12 8l-7 4.5z"/></svg>',
-    pencil: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.6 13.4 4.8 5.6 12.6 2.6 13.4l.8-3z"/></svg>'
+    pencil: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.6 13.4 4.8 5.6 12.6 2.6 13.4l.8-3z"/></svg>',
+    bolt: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9.2 1.5 3.5 9h4.1l-.8 5.5L12.5 7H8.4z"/></svg>',
+    server: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.5 6.75 8.5 4.5 10.5M8.5 10.5h3"/></svg>',
+    close: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>'
   };
 
   // Terminal palette, tuned to match the app chrome
@@ -446,6 +450,8 @@ window.onload = function() {
   // A combo is an array of keys; an entry may list several alternatives.
   // Keys in MOUSE_ACTIONS render as mouse actions rather than key caps.
   const MOD = IS_MAC ? 'Cmd' : 'Ctrl';
+  // Plain Ctrl+N belongs to the shell, so Windows and Linux add Shift
+  const QUICK_CONNECT_KEYS = IS_MAC ? ['Cmd', 'N'] : ['Ctrl', 'Shift', 'N'];
   const MOUSE_ACTIONS = new Set(['Click', 'Double-click', 'Right-click', 'Middle-click', 'Scroll up', 'Scroll down', 'Select text']);
 
   const SHORTCUT_GROUPS = [
@@ -462,7 +468,7 @@ window.onload = function() {
       ],
       footnote: IS_MAC
         ? null
-        : 'Plain Ctrl+C, Ctrl+V and Ctrl+F go to the remote shell, so copy, paste and find add Shift.'
+        : 'Plain Ctrl+C, Ctrl+V, Ctrl+F and Ctrl+N go to the remote shell, so copy, paste, find and Quick Connect add Shift.'
     },
     {
       title: 'Find bar',
@@ -488,13 +494,15 @@ window.onload = function() {
       items: [
         { action: 'Close a tab', combos: [['Middle-click']], note: 'On the tab itself. Asks first while its session is connected' },
         { action: 'Close or cancel a dialog', combos: [['Esc']] },
-        { action: 'Confirm a group name', combos: [['Enter']] }
+        { action: 'Confirm a group name', combos: [['Enter']] },
+        { action: 'Connect from Quick Connect', combos: [['Enter']] }
       ],
       footnote: 'A host key prompt never accepts on Enter, so a stray keypress can\'t trust a key you haven\'t read.'
     },
     {
       title: 'Application',
       items: [
+        { action: 'Quick Connect', combos: [QUICK_CONNECT_KEYS], note: 'Works from inside the terminal too' },
         { action: 'Open Settings', combos: [[MOD, ',']] },
         ...(IS_MAC ? [] : [
           { action: 'Show the menu bar', combos: [['Alt']] },
@@ -590,7 +598,7 @@ window.onload = function() {
       switchTab(remainingIds[remainingIds.length - 1]);
     } else {
       activeSessionId = null;
-      document.getElementById('connect-form').classList.remove('hidden');
+      setHomeVisible(true);
       closeFind();
     }
   }
@@ -632,7 +640,7 @@ window.onload = function() {
       }
       const size = { cols: session.term.cols, rows: session.term.rows };
       try {
-        window.electronAPI.connectSSH({ sessionId, config: session.config, size });
+        window.electronAPI.connectSSH({ sessionId, config: session.config, size, hostId: session.hostId });
         msgSpan.textContent = 'Attempting to reconnect…';
       } catch (err) {
         console.error('reconnect failed', err);
@@ -1163,6 +1171,7 @@ window.onload = function() {
     const { hosts = [], groups: storedGroups = [] } = await window.electronAPI.getHosts();
     allHosts = hosts;
     groups = storedGroups;
+    renderRecentConnections(); // saved hosts show there under their current names
     refreshGroupSelectors();
 
     const container = document.getElementById('saved-hosts-list');
@@ -1602,9 +1611,9 @@ window.onload = function() {
         // Save config for reconnect attempts
         session.config = config;
         term.write(`Connecting to ${config.host}...\r\n`);
-        document.getElementById('connect-form').classList.add('hidden');
+        setHomeVisible(false);
         const size = { cols: term.cols, rows: term.rows };
-        window.electronAPI.connectSSH({ sessionId, config, size });
+        window.electronAPI.connectSSH({ sessionId, config, size, hostId });
       }
       term.focus();
     }, 200);
@@ -1631,7 +1640,7 @@ window.onload = function() {
       const tab = document.getElementById('tab-settings');
       if (tab) tab.classList.add('active');
       document.querySelectorAll('.terminal-instance').forEach(el => el.classList.remove('active'));
-      document.getElementById('connect-form').classList.add('hidden');
+      setHomeVisible(false);
       if (settingsView) settingsView.classList.add('visible');
       closeFind();
       return;
@@ -1644,7 +1653,7 @@ window.onload = function() {
     const session = sessions[sessionId];
     if (session) {
       session.container.classList.add('active');
-      document.getElementById('connect-form').classList.add('hidden');
+      setHomeVisible(false);
       setTimeout(() => {
         if (sessions[sessionId] !== session) return; // closed in the meantime
         // Pick up a zoom change made while this terminal was hidden
@@ -1693,7 +1702,7 @@ window.onload = function() {
       switchTab(remainingIds[remainingIds.length - 1]);
     } else {
       activeSessionId = null;
-      document.getElementById('connect-form').classList.remove('hidden');
+      setHomeVisible(true);
       closeFind();
     }
   }
@@ -1889,7 +1898,7 @@ window.onload = function() {
   });
 
   // -------------------------
-  // Terminal-wide shortcuts: find and zoom
+  // App shortcuts that work inside the terminal: find, zoom, Quick Connect
   // -------------------------
   // Handled in the capture phase so xterm never sees them; otherwise Ctrl+-
   // would also reach the shell as ^_.
@@ -1904,6 +1913,15 @@ window.onload = function() {
       e.preventDefault();
       e.stopPropagation();
       openFind();
+      return;
+    }
+
+    if (key.toLowerCase() === 'n' && (IS_MAC || e.shiftKey)) {
+      // Not over another dialog: a host key prompt or a confirmation comes first
+      if (document.querySelector('.modal-overlay:not(.hidden)')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openQuickConnect();
       return;
     }
 
@@ -2296,6 +2314,7 @@ window.onload = function() {
       isValid = false;
     } else userInput.style.border = '';
     if (!isValid) return;
+    closeQuickConnect();
     createSession(config, config.host);
   };
 
@@ -2304,10 +2323,161 @@ window.onload = function() {
     document.querySelectorAll('.terminal-instance').forEach(el => el.classList.remove('active'));
     const settingsView = document.getElementById('settings-view');
     if (settingsView) settingsView.classList.remove('visible');
-    document.getElementById('connect-form').classList.remove('hidden');
+    setHomeVisible(true);
     activeSessionId = null;
     closeFind();
   };
+
+  // -------------------------
+  // Quick Connect dialog and the home view's recent connections
+  // -------------------------
+  const quickConnectModal = document.getElementById('quick-connect-modal');
+
+  /**
+   * Open Quick Connect: empty from a lightning button, or filled in from a
+   * recent one-off session. Passwords are never stored, so that one is
+   * always asked for again.
+   */
+  function openQuickConnect(prefill = null) {
+    const hostInput = document.getElementById('inp-host');
+    const userInput = document.getElementById('inp-user');
+    const passInput = document.getElementById('inp-pass');
+    const authSelect = document.getElementById('auth-method');
+    const keySelect = document.getElementById('inp-key-select');
+
+    hostInput.value = prefill ? prefill.host : '';
+    document.getElementById('inp-port').value = prefill ? String(prefill.port || 22) : '22';
+    userInput.value = prefill ? prefill.username : '';
+    authSelect.value = prefill && prefill.authType === 'key' ? 'key' : 'password';
+    if (prefill && getKeyById(prefill.keyId)) keySelect.value = prefill.keyId;
+    passInput.value = '';
+    document.getElementById('inp-key-passphrase').value = '';
+    hostInput.style.border = '';
+    userInput.style.border = '';
+    keySelect.classList.remove('error');
+    updateQuickConnectAuthUI();
+
+    quickConnectModal.classList.remove('hidden');
+    // Start at the first thing left to fill in
+    const next = !prefill ? hostInput
+      : authSelect.value === 'password' ? passInput
+        : keySelect.value ? document.getElementById('btn-connect') : keySelect;
+    next.focus();
+  }
+
+  function closeQuickConnect() {
+    quickConnectModal.classList.add('hidden');
+    // Don't leave secrets sitting in the form
+    document.getElementById('inp-pass').value = '';
+    document.getElementById('inp-key-passphrase').value = '';
+  }
+
+  // The home view fills the terminal area whenever no tab is shown
+  function setHomeVisible(visible) {
+    document.getElementById('home-view').classList.toggle('hidden', !visible);
+    if (visible) loadRecentConnections();
+  }
+
+  async function loadRecentConnections() {
+    try {
+      recentConnections = await window.electronAPI.getRecentConnections();
+    } catch (e) {
+      console.warn('Could not load recent connections', e);
+      recentConnections = [];
+    }
+    renderRecentConnections();
+  }
+
+  // "just now", "5 min ago", "3 hr ago", "2 days ago", then the date
+  function formatLastConnected(timestamp, now = Date.now()) {
+    const minutes = Math.floor((now - timestamp) / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hr ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+    const date = new Date(timestamp);
+    const options = { day: 'numeric', month: 'short' };
+    if (date.getFullYear() !== new Date(now).getFullYear()) options.year = 'numeric';
+    return date.toLocaleDateString(undefined, options);
+  }
+
+  // A saved host shows under its current name and address. One-off sessions,
+  // and saved hosts deleted since, use what was recorded.
+  function describeRecentConnection(entry) {
+    const saved = entry.hostId ? allHosts.find((h) => h.id === entry.hostId) : null;
+    if (saved) {
+      return { saved, name: saved.name || saved.host, meta: `${saved.username}@${saved.host}:${saved.port || 22}` };
+    }
+    const address = `${entry.username}@${entry.host}:${entry.port || 22}`;
+    return {
+      saved: null,
+      name: entry.name || entry.host,
+      meta: entry.hostId ? `${address} · no longer saved` : `${address} · Quick Connect`
+    };
+  }
+
+  function openRecentConnection(entry) {
+    const saved = entry.hostId ? allHosts.find((h) => h.id === entry.hostId) : null;
+    if (saved) createSession(buildConfigFromHost(saved), saved.name, saved.id);
+    else openQuickConnect(entry);
+  }
+
+  function renderRecentConnections() {
+    const list = document.getElementById('recent-list');
+    if (!list || !recentConnections) return;
+    list.innerHTML = '';
+    document.getElementById('btn-clear-recent').classList.toggle('hidden', recentConnections.length === 0);
+
+    if (recentConnections.length === 0) {
+      list.innerHTML = '<div class="recent-empty"><strong>No recent connections yet</strong>'
+        + 'Connect to a saved host, or use Quick Connect for a one-off session.</div>';
+      return;
+    }
+
+    const now = Date.now();
+    recentConnections.forEach((entry) => {
+      const { saved, name, meta } = describeRecentConnection(entry);
+      const row = document.createElement('div');
+      row.className = 'recent-row';
+      row.setAttribute('role', 'listitem');
+      row.innerHTML = `
+        <button class="recent-open" title="${escapeHtml(saved ? `Connect to ${name}` : 'Open in Quick Connect')}">
+          <span class="recent-icon${saved ? '' : ' quick'}">${saved ? ICONS.server : ICONS.bolt}</span>
+          <span class="recent-text">
+            <span class="recent-name">${escapeHtml(name)}</span>
+            <span class="recent-meta">${escapeHtml(meta)}</span>
+          </span>
+          <span class="recent-time" title="Last connected ${escapeHtml(new Date(entry.lastConnected).toLocaleString())}">${escapeHtml(formatLastConnected(entry.lastConnected, now))}</span>
+        </button>
+        <button class="recent-remove" title="Remove from recent connections" aria-label="Remove ${escapeHtml(name)} from recent connections">${ICONS.close}</button>
+      `;
+      row.querySelector('.recent-open').addEventListener('click', () => openRecentConnection(entry));
+      row.querySelector('.recent-remove').addEventListener('click', async () => {
+        recentConnections = await window.electronAPI.removeRecentConnection(entry.id).catch(() => recentConnections);
+        renderRecentConnections();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  document.getElementById('quick-connect-btn').addEventListener('click', () => openQuickConnect());
+  ['quick-connect-btn', 'home-quick-connect-btn'].forEach((id) => {
+    document.getElementById(id).title = `Quick Connect (${QUICK_CONNECT_KEYS.join('+')})`;
+  });
+  document.getElementById('home-quick-connect-btn').addEventListener('click', () => openQuickConnect());
+  document.getElementById('btn-quick-cancel').addEventListener('click', closeQuickConnect);
+  // Enter anywhere in the form connects; a focused button keeps its own Enter
+  quickConnectModal.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName === 'BUTTON') return;
+    e.preventDefault();
+    document.getElementById('btn-connect').click();
+  });
+  document.getElementById('btn-clear-recent').addEventListener('click', async () => {
+    recentConnections = await window.electronAPI.clearRecentConnections().catch(() => recentConnections);
+    renderRecentConnections();
+  });
 
   if (window.electronAPI.onOpenSettings) {
     // The Settings menu can ask for a specific page ('keys' or 'shortcuts')
@@ -2475,6 +2645,9 @@ window.onload = function() {
   groupModal.addEventListener('mousedown', (e) => {
     if (e.target === groupModal) closeGroupModal();
   });
+  quickConnectModal.addEventListener('mousedown', (e) => {
+    if (e.target === quickConnectModal) closeQuickConnect();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     // The close/reload confirmation stacks on top of everything; Esc cancels
@@ -2483,6 +2656,7 @@ window.onload = function() {
     else if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
     else if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
     else if (!groupModal.classList.contains('hidden')) closeGroupModal();
+    else if (!quickConnectModal.classList.contains('hidden')) closeQuickConnect();
   });
 
   // Flag the body so the CSS can leave room for native window controls
@@ -2509,6 +2683,12 @@ window.onload = function() {
   syncClearSearchBtn();
   loadSSHKeys().finally(() => {
     updateQuickConnectAuthUI();
-    loadHosts();
+    // Hosts first, so saved hosts in the recent list show their names
+    loadHosts().finally(loadRecentConnections);
   });
+
+  // Keep "5 min ago" honest while the home view sits open
+  setInterval(() => {
+    if (!document.getElementById('home-view').classList.contains('hidden')) renderRecentConnections();
+  }, 60000);
 };

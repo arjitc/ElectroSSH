@@ -11,6 +11,7 @@ const userDataPath = app.getPath('userData'); // Get a writable path
 const hostsFilePath = path.join(userDataPath, 'saved_hosts.json');
 const keysFilePath = path.join(userDataPath, 'ssh_keys.json');
 const knownHostsFilePath = path.join(userDataPath, 'known_hosts.json');
+const recentFilePath = path.join(userDataPath, 'recent_connections.json');
 
 console.log('Host data path:', hostsFilePath);
 // Store active sessions: { sessionId: { conn: Client, stream: Stream } }
@@ -83,6 +84,65 @@ function writeHostStore(store) {
   };
   
   fs.writeFileSync(hostsFilePath, JSON.stringify(cleanedStore, null, 2), 'utf-8');
+}
+
+// --- Recent connections ---
+//
+// The newest successful connections, for the home view. Entries are built
+// from a fixed set of fields, so a password, passphrase or key path never
+// reaches the file. A saved host is recorded by id so the list follows later
+// edits to it; its address is kept too, for when the host has been deleted.
+const MAX_RECENT_CONNECTIONS = 10;
+
+function readRecentConnections() {
+  try {
+    const data = JSON.parse(fs.readFileSync(recentFilePath, 'utf-8'));
+    const entries = data && Array.isArray(data.entries) ? data.entries : [];
+    return entries.filter((e) => e && typeof e.host === 'string' && typeof e.username === 'string');
+  } catch (e) {
+    return []; // missing or unreadable: start a new list
+  }
+}
+
+function writeRecentConnections(entries) {
+  fs.writeFileSync(recentFilePath, JSON.stringify({ entries }, null, 2), 'utf-8');
+}
+
+// One entry per saved host, and one per user@host:port for one-off sessions
+function recentConnectionId(entry) {
+  return entry.hostId ? `host:${entry.hostId}` : `quick:${entry.username}@${entry.host}:${entry.port}`;
+}
+
+function newestRecentFirst(entries) {
+  return [...entries]
+    .sort((a, b) => (Number(b.lastConnected) || 0) - (Number(a.lastConnected) || 0))
+    .slice(0, MAX_RECENT_CONNECTIONS);
+}
+
+// What the renderer gets: newest first, each with the id it removes it by
+function listRecentConnections() {
+  return newestRecentFirst(readRecentConnections()).map((entry) => ({ ...entry, id: recentConnectionId(entry) }));
+}
+
+function recordRecentConnection(config, savedHostId) {
+  const saved = savedHostId ? readHostStore().hosts.find((h) => h.id === savedHostId) : null;
+  const entry = {
+    hostId: saved ? saved.id : null,
+    name: saved ? String(saved.name || '') : null,
+    host: String(config.host || ''),
+    port: parseInt(config.port, 10) || 22,
+    username: String(config.username || ''),
+    authType: config.authType === 'key' ? 'key' : 'password',
+    keyId: config.authType === 'key' && typeof config.keyId === 'string' ? config.keyId : null,
+    lastConnected: Date.now()
+  };
+  const id = recentConnectionId(entry);
+  const others = readRecentConnections().filter((e) => recentConnectionId(e) !== id);
+  try {
+    writeRecentConnections(newestRecentFirst([entry, ...others]));
+  } catch (e) {
+    console.warn('Could not save recent connections:', e.message); // the session itself is unaffected
+  }
 }
 
 // --- Known Hosts (host key verification) ---
@@ -448,6 +508,17 @@ ipcMain.handle('window-chrome', () => windowChromeMode());
 // is started from another entry script, as the e2e tests do.
 const { version: APP_VERSION } = require('./package.json');
 ipcMain.handle('app-version', () => APP_VERSION);
+
+// The home view's recent connections (recorded in 'ssh-connect' on 'ready')
+ipcMain.handle('get-recent-connections', () => listRecentConnections());
+ipcMain.handle('remove-recent-connection', (event, id) => {
+  writeRecentConnections(readRecentConnections().filter((e) => recentConnectionId(e) !== id));
+  return listRecentConnections();
+});
+ipcMain.handle('clear-recent-connections', () => {
+  writeRecentConnections([]);
+  return [];
+});
 
 // Open a link from terminal output in the user's browser. That text is written
 // by the remote host, so only web URLs are allowed: shell.openExternal will
@@ -941,7 +1012,9 @@ function buildMenu() {
       // timer runs instead, paused while a prompt is open.
       const HANDSHAKE_TIMEOUT_MS = 20000;
 
-      ipcMain.on('ssh-connect', (event, { sessionId, config, size }) => {
+      // hostId is the saved host the connection came from, if any; it only
+      // labels the entry in the recent list.
+      ipcMain.on('ssh-connect', (event, { sessionId, config, size, hostId: savedHostId }) => {
         if (sessions[sessionId]) {
           cancelHostKeyPrompts(sessionId, event.sender);
           sessions[sessionId].conn.end();
@@ -1019,6 +1092,8 @@ function buildMenu() {
 
         conn.on('ready', () => {
           clearHandshakeTimer();
+          // Before 'Connected' goes out, so the renderer's next read includes it
+          recordRecentConnection(config, savedHostId);
           event.sender.send('ssh-status', { sessionId, status: 'Connected' });
 
           // Open the shell at whatever size the terminal is *now*, which may

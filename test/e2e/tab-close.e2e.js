@@ -63,7 +63,7 @@ run(async () => {
   // never speaks SSH, so the handshake never finishes
   const silent = net.createServer(() => {});
   await new Promise((r) => silent.listen(0, '127.0.0.1', r));
-  await t.js(`document.getElementById('new-tab-btn').click();
+  await t.js(`document.getElementById('quick-connect-btn').click();
     document.getElementById('inp-host').value = '127.0.0.1';
     document.getElementById('inp-port').value = '${silent.address().port}';
     document.getElementById('inp-user').value = 'tester';

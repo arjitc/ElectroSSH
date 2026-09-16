@@ -76,6 +76,13 @@ async function start() {
   const userData = fs.mkdtempSync(path.join(parent, 'electrossh-e2e-'));
   app.setPath('userData', userData);
 
+  // Writing a crash dump can freeze this process for anything from a couple
+  // of seconds to minutes after forcefullyCrashRenderer(), which stalls the
+  // timers the tests wait on. No dump is wanted here, and any that appears
+  // goes to the throwaway directory.
+  app.commandLine.appendSwitch('disable-breakpad');
+  app.setPath('crashDumps', path.join(userData, 'crashes'));
+
   const native = { calls: [], answer: 'cancel' };
   dialog.showMessageBox = async (win, opts) => {
     native.calls.push(opts.message);
@@ -123,7 +130,7 @@ async function start() {
     ]);
   };
   for (let i = 0; i < 200; i++) {
-    const ready = await js(`document.readyState === 'complete' && !!document.getElementById('connect-form')`).catch(() => false);
+    const ready = await js(`document.readyState === 'complete' && !!document.getElementById('home-view')`).catch(() => false);
     if (ready) break;
     await sleep(50);
   }
@@ -177,17 +184,10 @@ async function start() {
   })()`).catch(() => ({ shown: false }));
 
   /**
-   * Quick Connect to a local test server, answering the host key prompt with
-   * "Connect Once". Resolves true once the server has opened a shell.
+   * Answer host key prompts with "Connect Once" until the test server has
+   * opened more than `before` shells. Resolves true once it has.
    */
-  const connect = async (server) => {
-    const before = server.state.shellsOpened;
-    await js(`document.getElementById('new-tab-btn').click();
-      document.getElementById('inp-host').value = '127.0.0.1';
-      document.getElementById('inp-port').value = '${server.port}';
-      document.getElementById('inp-user').value = 'tester';
-      document.getElementById('inp-pass').value = 'x';
-      document.getElementById('btn-connect').click(); 'ok'`);
+  const waitForShell = async (server, before) => {
     for (let i = 0; i < 60 && server.state.shellsOpened === before; i++) {
       await js(`(() => { const m = document.getElementById('host-key-modal');
         if (!m.classList.contains('hidden')) document.getElementById('btn-host-key-once').click(); })()`).catch(() => {});
@@ -195,6 +195,18 @@ async function start() {
     }
     await sleep(300);
     return server.state.shellsOpened > before;
+  };
+
+  /** Quick Connect to a local test server; resolves as waitForShell does. */
+  const connect = async (server) => {
+    const before = server.state.shellsOpened;
+    await js(`document.getElementById('quick-connect-btn').click();
+      document.getElementById('inp-host').value = '127.0.0.1';
+      document.getElementById('inp-port').value = '${server.port}';
+      document.getElementById('inp-user').value = 'tester';
+      document.getElementById('inp-pass').value = 'x';
+      document.getElementById('btn-connect').click(); 'ok'`);
+    return waitForShell(server, before);
   };
 
   /** A menu item by its path, e.g. menuItem('View', 'Reload'). */
@@ -208,7 +220,7 @@ async function start() {
   const menuReload = () => menuItem('View', 'Reload').click();
   const closeWindow = () => win.close();
 
-  return { app, win, wc, js, press, click, clickAt, focus, confirmDialog, connect, native, sentToPage, sleep, menuItem, menuReload, closeWindow, keepAlive };
+  return { app, win, wc, js, press, click, clickAt, focus, confirmDialog, connect, native, sentToPage, sleep, menuItem, menuReload, closeWindow, keepAlive, waitForShell };
 }
 
 // 'css selector' or 'last:css selector' (the last match)

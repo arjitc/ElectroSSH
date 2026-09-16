@@ -214,6 +214,8 @@ select {
 }
 .brand-version::before { content: '·'; margin-right: 6px; }
 
+.sidebar-top-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+
 .sidebar-search {
   position: relative;
   padding: 10px 12px 6px;
@@ -597,44 +599,126 @@ body.resizing { cursor: col-resize; user-select: none; }
 .term-banner-btns button:disabled { opacity: .5; cursor: not-allowed; }
 .term-banner-btns .term-banner-dismiss { padding: 4px 8px; }
 
-/* ---------- Quick connect ---------------------------------------------- */
+/* ---------- Home view (recent connections) ----------------------------- */
 
-#connect-form {
+#home-view {
   position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 340px;
-  max-width: 90%;
-  padding: 22px;
+  inset: 0;
+  display: flex;
+  padding: 24px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+.home-card {
+  width: 460px;
+  max-width: 100%;
+  margin: auto;
+  padding: 20px 20px 16px;
   box-sizing: border-box;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: var(--shadow-lg);
 }
-#connect-form h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
-#connect-form .form-hint {
-  margin: 0 0 18px;
-  font-size: 12px;
+.home-header h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--text); }
+.home-header .form-hint { margin: 0; font-size: 12px; color: var(--text-faint); }
+#btn-clear-recent { padding: 5px 9px; font-size: 12px; }
+
+.recent-list { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.recent-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background-color .12s;
+}
+.recent-row:hover,
+.recent-row:focus-within { background: var(--bg-hover); }
+
+.recent-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.recent-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent) inset; }
+
+.recent-icon {
+  flex: none;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-xs);
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+.recent-icon.quick { color: var(--warn); }
+
+.recent-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.recent-name,
+.recent-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.recent-meta { margin-top: 2px; font-size: 11.5px; color: var(--text-faint); }
+.recent-time {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Remove: shown on hover or keyboard focus, like the host tree's actions */
+.recent-remove {
+  flex: none;
+  width: 24px; height: 24px;
+  margin-right: 6px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--text-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity .12s, background-color .12s, color .12s;
+}
+.recent-row:hover .recent-remove,
+.recent-row:focus-within .recent-remove { opacity: 1; }
+.recent-remove:hover { background: var(--bg-elevated); color: var(--text); }
+.recent-remove:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent) inset; }
+
+.recent-empty {
+  padding: 26px 16px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
   color: var(--text-faint);
 }
-#connect-form .field { margin-bottom: 12px; }
-#connect-form .field label {
-  display: block;
-  margin-bottom: 5px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-dim);
+.recent-empty strong { display: block; margin-bottom: 2px; font-weight: 600; color: var(--text-dim); }
+
+.home-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
-#connect-form .field-row { display: flex; gap: 10px; }
-#connect-form .field-row .field { flex: 1 1 auto; }
-#connect-form .field-row .field.port { flex: 0 0 84px; }
-#btn-connect { width: 100%; margin-top: 8px; padding: 9px 12px; }
+.home-footer .btn svg { color: var(--warn); }
+.home-footer-hint { font-size: 12px; color: var(--text-faint); }
 
 /* ---------- Settings view ---------------------------------------------- */
 

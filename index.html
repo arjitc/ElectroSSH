@@ -28,11 +28,18 @@
           <span>ElectroSSH</span>
           <span id="app-version" class="brand-version hidden"></span>
         </div>
-        <button id="add-host-btn" class="btn-icon" title="Add host" aria-label="Add host">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-            <path d="M8 3.5v9M3.5 8h9"></path>
-          </svg>
-        </button>
+        <div class="sidebar-top-actions">
+          <button id="add-host-btn" class="btn-icon" title="Add host" aria-label="Add host">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <path d="M8 3.5v9M3.5 8h9"></path>
+            </svg>
+          </button>
+          <button id="quick-connect-btn" class="btn-icon" title="Quick Connect" aria-label="Quick Connect">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+              <path d="M9.2 1.5 3.5 9h4.1l-.8 5.5L12.5 7H8.4z"></path>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="sidebar-search">
@@ -122,52 +129,27 @@
         <!-- Brief "font size" readout shown while zooming -->
         <div id="zoom-indicator" class="zoom-indicator" aria-live="polite"></div>
 
-        <!-- Quick Connect -->
-        <div id="connect-form">
-          <h3>Quick Connect</h3>
-          <p class="form-hint">Start a one-off session without saving it.</p>
-
-          <div class="field-row">
-            <div class="field">
-              <label for="inp-host">Host</label>
-              <input type="text" id="inp-host" placeholder="IP or DNS name">
+        <!-- Home: recent connections, shown while no tab is -->
+        <div id="home-view">
+          <div class="home-card">
+            <div class="home-header">
+              <div>
+                <h3>Recent connections</h3>
+                <p class="form-hint">Your last 10 sessions, newest first.</p>
+              </div>
+              <button id="btn-clear-recent" class="btn btn-ghost hidden" title="Clear the list">Clear</button>
             </div>
-            <div class="field port">
-              <label for="inp-port">Port</label>
-              <input type="number" id="inp-port" value="22" placeholder="22">
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="inp-user">Username</label>
-            <input type="text" id="inp-user" placeholder="root">
-          </div>
-
-          <div class="field">
-            <label for="auth-method">Authentication</label>
-            <select id="auth-method">
-              <option value="password">Password</option>
-              <option value="key">SSH Key</option>
-            </select>
-          </div>
-
-          <div id="password-wrapper" class="field">
-            <label for="inp-pass">Password</label>
-            <input type="password" id="inp-pass" placeholder="Optional">
-          </div>
-
-          <div id="key-wrapper" class="hidden">
-            <div class="field">
-              <label for="inp-key-select">SSH Key</label>
-              <select id="inp-key-select"></select>
-            </div>
-            <div class="field">
-              <label for="inp-key-passphrase">Passphrase</label>
-              <input type="password" id="inp-key-passphrase" placeholder="If the key is encrypted">
+            <div id="recent-list" class="recent-list" role="list" aria-label="Recent connections"></div>
+            <div class="home-footer">
+              <button id="home-quick-connect-btn" class="btn">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                  <path d="M9.2 1.5 3.5 9h4.1l-.8 5.5L12.5 7H8.4z"></path>
+                </svg>
+                Quick Connect
+              </button>
+              <span class="home-footer-hint">or double-click a saved host</span>
             </div>
           </div>
-
-          <button id="btn-connect" class="btn btn-primary">Connect</button>
         </div>
 
         <div id="settings-view">
@@ -333,6 +315,58 @@
         <div class="spacer"></div>
         <button id="btn-group-cancel" class="btn">Cancel</button>
         <button id="btn-group-confirm" class="btn btn-primary">Create Group</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Connect: a one-off session, from the lightning buttons or a
+       recent one-off entry (filled in, apart from the password) -->
+  <div id="quick-connect-modal" class="modal-overlay hidden">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="quick-connect-title">
+      <div class="modal-header">
+        <h3 id="quick-connect-title">Quick Connect</h3>
+        <p>Start a one-off session without saving it.</p>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="inp-host">Host</label>
+            <input type="text" id="inp-host" placeholder="IP or DNS name" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="form-group port">
+            <label for="inp-port">Port</label>
+            <input type="number" id="inp-port" value="22" placeholder="22">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="inp-user">Username</label>
+          <input type="text" id="inp-user" placeholder="root" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="auth-method">Authentication</label>
+          <select id="auth-method">
+            <option value="password">Password</option>
+            <option value="key">SSH Key</option>
+          </select>
+        </div>
+        <div id="key-wrapper" class="hidden">
+          <div class="form-group">
+            <label for="inp-key-select">SSH Key</label>
+            <select id="inp-key-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="inp-key-passphrase">Passphrase</label>
+            <input type="password" id="inp-key-passphrase" placeholder="If the key is encrypted">
+          </div>
+        </div>
+        <div id="password-wrapper" class="form-group">
+          <label for="inp-pass">Password</label>
+          <input type="password" id="inp-pass" placeholder="Optional">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-quick-cancel" class="btn">Cancel</button>
+        <button id="btn-connect" class="btn btn-primary">Connect</button>
       </div>
     </div>
   </div>

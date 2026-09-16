@@ -46,13 +46,20 @@ function runFile(file) {
   let checks = 0;
   for (const file of files) {
     const name = path.relative(process.cwd(), file);
-    const r = await runFile(file);
+    let r = await runFile(file);
+
+    // Electron's main process can freeze for minutes while Windows deals with
+    // a crashed renderer, which looks exactly like a hung test. A file that
+    // ran out of time without failing a check gets one more go.
+    const stalled = r.timedOut && !r.lines.some((l) => l.startsWith('not ok'));
+    if (stalled) r = await runFile(file);
+
     const failures = r.lines.filter((l) => l.startsWith('not ok'));
     checks += r.lines.filter((l) => /^(ok|not ok) /.test(l)).length;
     const passed = r.code === 0 && failures.length === 0 && r.lines.length > 0;
     if (!passed) failedFiles++;
 
-    console.log(`${passed ? 'PASS' : 'FAIL'}  ${name}`);
+    console.log(`${passed ? 'PASS' : 'FAIL'}  ${name}${stalled ? '  (first attempt stalled, re-run)' : ''}`);
     r.lines.forEach((l) => console.log(`      ${l}`));
     if (r.timedOut) console.log(`      # timed out after ${TIMEOUT_MS / 1000}s`);
     else if (!passed && r.lines.length === 0) console.log('      # no results reported');

@@ -35,7 +35,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 **Sessions.** The renderer creates a `sessionId` and sends `ssh-connect`. `main.js` keeps `sessions[sessionId] = { conn, stream, size, appliedSize }` and streams back `ssh-data`, `ssh-status` and `ssh-error`. The renderer's `sessions[sessionId]` holds the `Terminal`, its addons, the tab element, the connection config, and `connected`.
 
-**Persistence.** In Electron's `userData`: `saved_hosts.json` (`{ hosts, groups }`), `ssh_keys.json`, and `known_hosts.json` (`{ hosts: { "host:port": { <keyType>: { key, fingerprint, addedAt } } } }`). In renderer `localStorage`: `electrossh.collapsedGroups`, `electrossh.sidebarWidth`, `electrossh.fontSize`. Saved passwords are stored in clear text (see README).
+**Persistence.** In Electron's `userData`: `saved_hosts.json` (`{ hosts, groups }`), `ssh_keys.json`, `recent_connections.json` (`{ entries }`), and `known_hosts.json` (`{ hosts: { "host:port": { <keyType>: { key, fingerprint, addedAt } } } }`). In renderer `localStorage`: `electrossh.collapsedGroups`, `electrossh.sidebarWidth`, `electrossh.fontSize`. Saved passwords are stored in clear text (see README).
 
 **Window chrome.** `windowChromeMode()` uses `titleBarOverlay` on Windows, `hiddenInset` on macOS, and the native frame on Linux. The renderer fetches the mode over `window-chrome` and sets `body.frameless` plus `overlay-right`/`overlay-left`, which the CSS uses for drag regions and control spacing.
 
@@ -66,7 +66,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### Keyboard
 - Plain Ctrl+C/V/F belong to the remote shell; the app uses Ctrl+Shift+C/V/F (Cmd on macOS).
-- Zoom and find are handled in a capture-phase `keydown` on `window`, so xterm never sees them; otherwise Ctrl+- would also send `^_`.
+- Zoom, find and Quick Connect (Ctrl+Shift+N; Cmd+N on macOS) are handled in a capture-phase `keydown` on `window`, so xterm never sees them; otherwise Ctrl+- would also send `^_`. Find and Quick Connect do nothing while a dialog is open. The key list for Quick Connect is `QUICK_CONNECT_KEYS`, shared by the shortcuts page and the buttons' tooltips.
 - Menu accelerators fire only when xterm doesn't consume the key. With the terminal focused, Ctrl+W and Ctrl+R reach the shell; with focus elsewhere they hit the menu.
 - `SHORTCUT_GROUPS` in `renderer.js` is a hand-maintained reference rendered on the Settings > Keyboard Shortcuts page. Update it whenever a binding changes.
 
@@ -74,6 +74,11 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - The window `close` handler asks while SSH sessions are open, which covers Ctrl+W, the title bar button, Alt+F4 and Quit. Reload and Force Reload are custom menu items that go through `reloadWindow()`, not the built-in roles. `did-start-loading` disconnects any sessions left by the page being replaced (a reload used to leave authenticated shells running).
 - `confirmSessionLoss()` shows an in-app dialog, which must acknowledge within `SESSION_LOSS_ACK_MS` (1.5s); otherwise a native dialog is used. The close path must never depend on the renderer alone, or a hung or crashed page makes the window impossible to close.
 - In the renderer, `askSessionLoss()` shows one question at a time; a new question replaces the old one, which resolves as Cancel. Closing a tab (`requestCloseSession`) asks only when `session.connected` is true.
+
+### Recent connections and Quick Connect
+- `main.js` records a connection on ssh2's `ready` (`recordRecentConnection()`), so failed attempts never appear, and keeps the newest 10. Entries are built from a fixed set of fields, so a password, passphrase or key path can't reach the file.
+- The renderer sends `hostId` with `ssh-connect`. A saved host's entry follows it by id: the home view shows its current name, and a click reconnects it. One-off entries, and saved hosts deleted since, reopen Quick Connect filled in, because their passwords were never stored.
+- Quick Connect is a modal (`#quick-connect-modal`) opened by the lightning buttons in the sidebar and on the home view. The home view (`#home-view`) is shown through `setHomeVisible()` whenever no tab is, and reloads the list each time.
 
 ### Groups
 - `readHostStore()` re-creates the `default` group whenever it is missing, so it can't be deleted. `delete-group` refuses groups that still have hosts; this is enforced in `main.js`, not only by the disabled button.
@@ -96,6 +101,7 @@ Limits of synthetic input in the e2e tests:
 - Pointer moves from `sendInputEvent` don't reach xterm's link hover detection; `links.e2e.js` dispatches a DOM `mousemove` instead. Clicks do work.
 - `executeJavaScript` on a destroyed webContents never settles. The harness's `js()` refuses up front and times out.
 - With no windows left, the test process's event loop can stall, e.g. after `forcefullyCrashRenderer()` and a window close. The harness keeps a hidden spare window. `app.quit()` closes that spare too, so quitting tests call `keepAlive()` to put it back.
+- A crashed renderer freezes the main process while Windows deals with the crash: timers stop firing for anything from two seconds to past the runner's timeout (18s and 12s have both been measured), so a passing test can look hung. Disabling crash dumps (`disable-breakpad` in the harness) keeps dumps out of the temp directories but does not reliably shorten the freeze. What covers it: `waitFor()` takes a final look after its deadline, and `run.js` re-runs a file that timed out without failing a check.
 
 **Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
 
@@ -107,3 +113,4 @@ The original app was built with Gemini. Since then (details in `git log`):
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
 - **Settings and safety:** keyboard shortcuts page; confirmation before closing or reloading the app, or closing a connected tab.
+- **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button; app version beside the name.

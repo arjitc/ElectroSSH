@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Version from package.json, shown beside the app name
   getAppVersion: () => ipcRenderer.invoke('app-version'),
 
+  // Recent connections, newest first (main records each successful connect)
+  getRecentConnections: () => ipcRenderer.invoke('get-recent-connections'),
+  removeRecentConnection: (id) => ipcRenderer.invoke('remove-recent-connection', id),
+  clearRecentConnections: () => ipcRenderer.invoke('clear-recent-connections'),
+
   // Host Management
   getHosts: () => ipcRenderer.invoke('get-hosts'),
   saveHost: (hostData) => ipcRenderer.invoke('save-host', hostData),

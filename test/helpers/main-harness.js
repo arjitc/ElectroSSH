@@ -74,14 +74,17 @@ function loadMain({ shell = {}, dialog = {} } = {}) {
   /**
    * Open an SSH session through 'ssh-connect', the way the renderer does.
    * Resolves once the shell sends data ('connected') or main reports an error.
+   * `config` overrides fields of the default connection settings; `hostId`
+   * is the saved host it came from, as the renderer sends it.
    */
-  function connect({ sessionId, port, size = { cols: 80, rows: 24 }, timeoutMs = 15000 }) {
+  function connect({ sessionId, port, size = { cols: 80, rows: 24 }, timeoutMs = 15000, config = {}, hostId }) {
     const start = sent.length;
     const t0 = Date.now();
     ipcOn['ssh-connect'](event, {
       sessionId,
-      config: { host: '127.0.0.1', port, username: 'tester', password: 'x', authType: 'password', keepalive: 0 },
-      size
+      config: { host: '127.0.0.1', port, username: 'tester', password: 'x', authType: 'password', keepalive: 0, ...config },
+      size,
+      hostId
     });
     return new Promise((resolve) => {
       const poll = setInterval(() => {
