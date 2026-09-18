@@ -17,7 +17,7 @@ const MAIN_PATH = process.env.ELECTROSSH_MAIN
   ? path.resolve(process.env.ELECTROSSH_MAIN)
   : path.join(PROJECT_ROOT, 'main.js');
 
-function loadMain({ shell = {}, dialog = {} } = {}) {
+function loadMain({ shell = {}, dialog = {}, clipboard = {} } = {}) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'electrossh-test-'));
   const ipcOn = {};
   const ipcHandle = {};
@@ -49,6 +49,7 @@ function loadMain({ shell = {}, dialog = {} } = {}) {
     },
     Menu: { buildFromTemplate: () => ({}), setApplicationMenu: () => {} },
     shell: { openExternal: async () => {}, ...shell },
+    clipboard: { writeText: () => {}, ...clipboard },
     dialog: {
       showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
       showMessageBox: async (win, opts) => ({ response: opts.cancelId }),

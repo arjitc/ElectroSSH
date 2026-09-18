@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, dialog, clipboard } = require('electron');
 const { execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -518,6 +518,15 @@ ipcMain.handle('remove-recent-connection', (event, id) => {
 ipcMain.handle('clear-recent-connections', () => {
   writeRecentConnections([]);
   return [];
+});
+
+// Copy text for the page. Electron's clipboard works whether or not the
+// window has focus; navigator.clipboard.writeText refuses when it doesn't.
+const MAX_CLIPBOARD_TEXT = 16 * 1024 * 1024;
+ipcMain.handle('clipboard-write', (event, text) => {
+  if (typeof text !== 'string' || text.length > MAX_CLIPBOARD_TEXT) return false;
+  clipboard.writeText(text);
+  return true;
 });
 
 // Open a link from terminal output in the user's browser. That text is written

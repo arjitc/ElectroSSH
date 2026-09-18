@@ -371,6 +371,11 @@
     </div>
   </div>
 
+  <!-- Right-click menu for a saved host (filled in by renderer.js), and the
+       note it leaves after copying -->
+  <div id="host-context-menu" class="context-menu hidden" role="menu" aria-label="Copy host details"></div>
+  <div id="copy-toast" class="copy-toast" role="status" aria-live="polite"></div>
+
   <!-- Hover hint for links in terminal output: shows the real destination -->
   <div id="link-hint" class="link-hint" role="tooltip">
     <span id="link-hint-url" class="link-hint-url"></span>

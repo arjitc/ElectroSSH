@@ -80,6 +80,10 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - The renderer sends `hostId` with `ssh-connect`. A saved host's entry follows it by id: the home view shows its current name, and a click reconnects it. One-off entries, and saved hosts deleted since, reopen Quick Connect filled in, because their passwords were never stored.
 - Quick Connect is a modal (`#quick-connect-modal`) opened by the lightning buttons in the sidebar and on the home view. The home view (`#home-view`) is shown through `setHomeVisible()` whenever no tab is, and reloads the list each time.
 
+### Host right-click menu and the clipboard
+- Right-clicking a saved host opens `#host-context-menu`, an in-page menu (not a native one) built by `openHostMenu()`. It copies the address ("Copy IP address", or "Copy hostname" for a DNS name), the display name or the SSH port, and leaves a brief "Copied …" note. Shift+F10 and the Menu key open it from the host row's `keydown`.
+- Copying goes through main's `clipboard-write` (Electron's `clipboard`), because `navigator.clipboard.writeText` refuses while the window isn't focused. `writeClipboardText()` resolves true only once the text is on the clipboard.
+
 ### Groups
 - `readHostStore()` re-creates the `default` group whenever it is missing, so it can't be deleted. `delete-group` refuses groups that still have hosts; this is enforced in `main.js`, not only by the disabled button.
 

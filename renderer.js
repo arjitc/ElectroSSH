@@ -117,7 +117,7 @@ window.onload = function() {
   async function writeClipboardText(text) {
     try {
       if (window.electronAPI && typeof window.electronAPI.writeClipboard === 'function') {
-        return await window.electronAPI.writeClipboard(text);
+        if (await window.electronAPI.writeClipboard(text)) return true;
       }
     } catch (e) {
       console.warn('electronAPI.writeClipboard failed, falling back to navigator.clipboard', e);
@@ -125,14 +125,15 @@ window.onload = function() {
 
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        return await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(text);
+        return true;
       }
     } catch (e) {
       console.warn('navigator.clipboard.writeText failed or not permitted', e);
     }
 
     // nothing worked
-    return;
+    return false;
   }
 
   const IS_MAC = /Mac/i.test(navigator.userAgent);
@@ -482,6 +483,11 @@ window.onload = function() {
       title: 'Host list',
       items: [
         { action: 'Connect to a host', combos: [['Double-click'], ['Enter']] },
+        {
+          action: 'Copy a host\'s address, name or port',
+          combos: IS_MAC ? [['Right-click']] : [['Right-click'], ['Shift', 'F10']],
+          note: 'Opens a menu on the host'
+        },
         { action: 'Move between hosts and groups', combos: [['↑'], ['↓']] },
         { action: 'Expand or collapse a group', combos: [['→'], ['←']] },
         { action: 'Rename a group', combos: [['F2']] },
@@ -1020,6 +1026,105 @@ window.onload = function() {
     if (next) next.focus();
   }
 
+  // -------------------------
+  // Host right-click menu: copy a saved host's address, name or port
+  // -------------------------
+  const hostMenu = document.getElementById('host-context-menu');
+  const copyToast = document.getElementById('copy-toast');
+  let hostMenuReturnFocus = null;
+  let copyToastTimer = null;
+
+  // IPv4, or anything with a colon (IPv6); everything else is a hostname
+  function looksLikeIpAddress(value) {
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(value) || value.includes(':');
+  }
+
+  /** Open the menu for `host` at (x, y), flipping it back inside the window near an edge. */
+  function openHostMenu(host, x, y, rowEl) {
+    const address = String(host.host || '');
+    const items = [
+      { id: 'address', label: looksLikeIpAddress(address) ? 'Copy IP address' : 'Copy hostname', value: address },
+      { id: 'name', label: 'Copy display name', value: String(host.name || '') },
+      { id: 'port', label: 'Copy SSH port', value: String(host.port || 22) }
+    ];
+    hostMenu.innerHTML = '';
+    items.forEach((item) => {
+      const button = document.createElement('button');
+      button.className = 'context-menu-item';
+      button.dataset.copy = item.id;
+      button.setAttribute('role', 'menuitem');
+      button.tabIndex = -1;
+      button.disabled = !item.value;
+      button.innerHTML = `<span class="context-menu-label">${escapeHtml(item.label)}</span>`
+        + `<span class="context-menu-value">${escapeHtml(item.value)}</span>`;
+      button.addEventListener('mouseenter', () => { if (!button.disabled) button.focus(); });
+      button.addEventListener('click', () => copyFromHostMenu(item.value));
+      hostMenu.appendChild(button);
+    });
+
+    hostMenuReturnFocus = rowEl;
+    hostMenu.classList.remove('hidden');
+    const { width, height } = hostMenu.getBoundingClientRect();
+    const left = x + width > window.innerWidth - 4 ? x - width : x;
+    const top = y + height > window.innerHeight - 4 ? y - height : y;
+    hostMenu.style.left = `${Math.max(4, left)}px`;
+    hostMenu.style.top = `${Math.max(4, top)}px`;
+    const first = hostMenu.querySelector('.context-menu-item:not(:disabled)');
+    if (first) first.focus();
+  }
+
+  function closeHostMenu(restoreFocus = false) {
+    if (hostMenu.classList.contains('hidden')) return;
+    hostMenu.classList.add('hidden');
+    if (restoreFocus && hostMenuReturnFocus && hostMenuReturnFocus.isConnected) hostMenuReturnFocus.focus();
+    hostMenuReturnFocus = null;
+  }
+
+  async function copyFromHostMenu(value) {
+    const { left, top } = hostMenu.getBoundingClientRect();
+    closeHostMenu(true);
+    const copied = await writeClipboardText(value);
+    showCopyToast(copied ? `Copied ${value}` : 'Could not copy to the clipboard', left, top);
+  }
+
+  // A brief note where the menu was, since copying is otherwise invisible
+  function showCopyToast(text, x, y) {
+    copyToast.textContent = text;
+    const width = copyToast.offsetWidth;
+    copyToast.style.left = `${Math.max(4, Math.min(x, window.innerWidth - width - 4))}px`;
+    copyToast.style.top = `${Math.max(4, y)}px`;
+    copyToast.classList.add('visible');
+    clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(() => copyToast.classList.remove('visible'), 1400);
+  }
+
+  hostMenu.addEventListener('keydown', (e) => {
+    const items = [...hostMenu.querySelectorAll('.context-menu-item:not(:disabled)')];
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const next = index === -1 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length;
+      items[next].focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      items[e.key === 'Home' ? 0 : items.length - 1].focus();
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      // Esc here closes only the menu, not a dialog behind it
+      e.preventDefault();
+      e.stopPropagation();
+      closeHostMenu(true);
+    }
+  });
+  // A click anywhere else, scrolling the list, or leaving the window closes it
+  document.addEventListener('mousedown', (e) => {
+    if (!hostMenu.contains(e.target)) closeHostMenu();
+  }, true);
+  document.getElementById('saved-hosts-list').addEventListener('scroll', () => closeHostMenu());
+  window.addEventListener('blur', () => closeHostMenu());
+  window.addEventListener('resize', () => closeHostMenu());
+
   function selectHostRow(el) {
     selectedHostId = el.dataset.hostId;
     document.querySelectorAll('#saved-hosts-list .tree-host.selected')
@@ -1059,6 +1164,11 @@ window.onload = function() {
     `;
 
     el.addEventListener('click', () => selectHostRow(el));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      selectHostRow(el);
+      openHostMenu(host, e.clientX, e.clientY, el);
+    });
     el.addEventListener('dblclick', () => {
       createSession(buildConfigFromHost(host), host.name, host.id);
     });
@@ -1084,6 +1194,12 @@ window.onload = function() {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         moveTreeFocus(el, -1);
+      } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+        // The keyboard's way to the right-click menu, anchored under the row
+        e.preventDefault();
+        selectHostRow(el);
+        const rect = el.getBoundingClientRect();
+        openHostMenu(host, rect.left + 16, rect.bottom, el);
       }
     });
 
