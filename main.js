@@ -134,6 +134,7 @@ function recordRecentConnection(config, savedHostId) {
     username: String(config.username || ''),
     authType: config.authType === 'key' ? 'key' : 'password',
     keyId: config.authType === 'key' && typeof config.keyId === 'string' ? config.keyId : null,
+    keepalive: normalizeKeepalive(config.keepalive),
     lastConnected: Date.now()
   };
   const id = recentConnectionId(entry);

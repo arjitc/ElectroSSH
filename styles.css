@@ -955,6 +955,8 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   line-height: 1.45;
   color: var(--text-faint);
 }
+/* Quick Connect's keep-alive error sits under the note, spaced like it */
+#quick-connect-error { margin: -6px 0 13px; min-height: 0; }
 
 .rename-group-btn {
   flex: none;

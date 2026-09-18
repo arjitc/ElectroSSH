@@ -6,6 +6,7 @@
 // one click, a one-off session reopening Quick Connect filled in (its
 // password is never stored).
 
+const { ipcMain } = require('electron');
 const { start, check, run, waitFor } = require('./harness');
 const { startSshServer } = require('../helpers/ssh-server');
 
@@ -19,7 +20,10 @@ run(async () => {
     host: document.getElementById('inp-host').value,
     port: document.getElementById('inp-port').value,
     user: document.getElementById('inp-user').value,
-    pass: document.getElementById('inp-pass').value
+    pass: document.getElementById('inp-pass').value,
+    keepalive: document.getElementById('inp-keepalive').value,
+    error: document.getElementById('quick-connect-error').classList.contains('hidden')
+      ? '' : document.getElementById('quick-connect-error').textContent
   }))()`);
   const recentRows = () => t.js(`[...document.querySelectorAll('#recent-list .recent-row')].map((row) => ({
     name: row.querySelector('.recent-name').textContent,
@@ -33,15 +37,40 @@ run(async () => {
 
   check('a fresh install shows an empty recent list', await waitFor(listEmpty));
 
+  // Every connect request main receives, to see what the dialog sent
+  const connectRequests = [];
+  ipcMain.on('ssh-connect', (event, payload) => connectRequests.push(payload));
+
   // The lightning button opens an empty Quick Connect, ready for a host
   await t.click('#quick-connect-btn');
   let form = await quickConnect();
   check('the lightning button opens Quick Connect', form.shown && form.focused === 'inp-host', form);
+  check('with the default keep-alive of 5 seconds', form.keepalive === '5', form);
+
+  // A keep-alive it can't use is refused, saying why, as in the host dialog
+  await t.js(`document.getElementById('inp-host').value = '127.0.0.1';
+    document.getElementById('inp-user').value = 'tester';
+    document.getElementById('inp-keepalive').value = '-3';
+    document.getElementById('btn-connect').click(); 'ok'`);
+  form = await quickConnect();
+  check('an invalid keep-alive is refused, saying why',
+    form.shown && form.error.startsWith('Keep-alive must be a whole number') && connectRequests.length === 0, form);
   await t.press('Escape');
   check('Esc closes it', !(await quickConnect()).shown);
 
-  // A one-off session: the dialog closes and forgets the password
-  check('a Quick Connect session connects', await t.connect(server));
+  // A one-off session with its own keep-alive; the dialog closes and forgets
+  // the password
+  let before = server.state.shellsOpened;
+  await t.js(`document.getElementById('quick-connect-btn').click();
+    document.getElementById('inp-host').value = '127.0.0.1';
+    document.getElementById('inp-port').value = '${server.port}';
+    document.getElementById('inp-user').value = 'tester';
+    document.getElementById('inp-pass').value = 'x';
+    document.getElementById('inp-keepalive').value = '15';
+    document.getElementById('btn-connect').click(); 'ok'`);
+  check('a Quick Connect session connects', await t.waitForShell(server, before));
+  check('using the keep-alive set in the dialog',
+    connectRequests.length === 1 && connectRequests[0].config.keepalive === 15, connectRequests.map((r) => r.config.keepalive));
   form = await quickConnect();
   check('Quick Connect closes and clears the password', !form.shown && form.pass === '', form);
 
@@ -77,6 +106,7 @@ run(async () => {
   form = await quickConnect();
   check('a one-off entry reopens Quick Connect filled in',
     form.shown && form.host === '127.0.0.1' && form.port === String(server.port) && form.user === 'tester' && form.pass === '', form);
+  check('with the keep-alive it used', form.keepalive === '15', form);
   check('with the password field focused', form.focused === 'inp-pass', form);
   await t.press('Escape');
 
@@ -87,7 +117,7 @@ run(async () => {
       return 'ok';
     })`);
   await waitFor(() => t.js(`!!document.querySelector('.tree-host')`));
-  let before = server.state.shellsOpened;
+  before = server.state.shellsOpened;
   await t.js(`document.querySelector('.tree-host').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 'ok'`);
   check('a saved host connects', await t.waitForShell(server, before));
 

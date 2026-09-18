@@ -83,6 +83,18 @@ window.onload = function() {
     return Math.min(seconds, MAX_KEEPALIVE);
   }
 
+  // What the host dialog and Quick Connect accept in their keep-alive box.
+  // A number input hands back '' for anything unparseable, so an empty box
+  // simply means "use the default"; negatives and decimals are rejected.
+  // Returns the number of seconds, or null for a value that isn't allowed.
+  function parseKeepaliveInput(input) {
+    const raw = input.value.trim();
+    if (raw === '') return DEFAULT_KEEPALIVE;
+    const seconds = Number(raw);
+    return Number.isInteger(seconds) && seconds >= 0 && seconds <= MAX_KEEPALIVE ? seconds : null;
+  }
+  const KEEPALIVE_ERROR = `Keep-alive must be a whole number of seconds from 0 to ${MAX_KEEPALIVE} (0 disables it).`;
+
   function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -1447,17 +1459,10 @@ window.onload = function() {
     const hostId = document.getElementById('host-id').value;
     const errorEl = document.getElementById('host-error');
 
-    // A number input hands back '' for anything unparseable, so an empty
-    // box simply means "use the default"; negatives and decimals are rejected.
-    const keepaliveRaw = document.getElementById('save-keepalive').value.trim();
-    let keepalive = DEFAULT_KEEPALIVE;
-    if (keepaliveRaw !== '') {
-      const parsed = Number(keepaliveRaw);
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_KEEPALIVE) {
-        errorEl.textContent = `Keep-alive must be a whole number of seconds from 0 to ${MAX_KEEPALIVE} (0 disables it).`;
-        return;
-      }
-      keepalive = parsed;
+    const keepalive = parseKeepaliveInput(document.getElementById('save-keepalive'));
+    if (keepalive === null) {
+      errorEl.textContent = KEEPALIVE_ERROR;
+      return;
     }
 
     const hostData = {
@@ -2396,6 +2401,8 @@ window.onload = function() {
     const keySelect = document.getElementById('inp-key-select');
     const keyPass = document.getElementById('inp-key-passphrase');
     const authMethod = document.getElementById('auth-method').value;
+    const keepaliveInput = document.getElementById('inp-keepalive');
+    const keepalive = parseKeepaliveInput(keepaliveInput);
 
     const config = {
       host: hostInput.value,
@@ -2403,7 +2410,7 @@ window.onload = function() {
       username: userInput.value,
       password: passInput.value,
       authType: authMethod,
-      keepalive: DEFAULT_KEEPALIVE
+      keepalive
     };
 
     if (authMethod === 'key') {
@@ -2429,6 +2436,16 @@ window.onload = function() {
       userInput.style.border = '1px solid #ff4444';
       isValid = false;
     } else userInput.style.border = '';
+    const keepaliveError = document.getElementById('quick-connect-error');
+    if (keepalive === null) {
+      keepaliveInput.style.border = '1px solid #ff4444';
+      keepaliveError.textContent = KEEPALIVE_ERROR;
+      keepaliveError.classList.remove('hidden');
+      isValid = false;
+    } else {
+      keepaliveInput.style.border = '';
+      keepaliveError.classList.add('hidden');
+    }
     if (!isValid) return;
     closeQuickConnect();
     createSession(config, config.host);
@@ -2464,12 +2481,18 @@ window.onload = function() {
     hostInput.value = prefill ? prefill.host : '';
     document.getElementById('inp-port').value = prefill ? String(prefill.port || 22) : '22';
     userInput.value = prefill ? prefill.username : '';
+    // A recent one-off session comes back with the keep-alive it used
+    const keepaliveInput = document.getElementById('inp-keepalive');
+    keepaliveInput.value = String(prefill && prefill.keepalive != null
+      ? normalizeKeepalive(prefill.keepalive) : DEFAULT_KEEPALIVE);
     authSelect.value = prefill && prefill.authType === 'key' ? 'key' : 'password';
     if (prefill && getKeyById(prefill.keyId)) keySelect.value = prefill.keyId;
     passInput.value = '';
     document.getElementById('inp-key-passphrase').value = '';
     hostInput.style.border = '';
     userInput.style.border = '';
+    keepaliveInput.style.border = '';
+    document.getElementById('quick-connect-error').classList.add('hidden');
     keySelect.classList.remove('error');
     updateQuickConnectAuthUI();
 

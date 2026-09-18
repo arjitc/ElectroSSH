@@ -53,7 +53,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - On reconnect, the old connection's `end`/`close` events arrive after the new one has taken the same session id. Handlers act only when `isCurrent()` is true.
 - Resizes are never dropped. A `term-resize` that arrives before the shell exists is stored and applied by `applyWindowSize()` when the stream opens (dropping them made htop draw short). The renderer also re-syncs size on `Connected`.
 - ssh2 re-runs the host verifier on every rekey. `acceptedHostKey` stops "Connect Once" from prompting again mid-session.
-- Keepalive: `normalizeKeepalive()` exists in both `main.js` and `renderer.js`; keep them identical. Default 5s, `0` disables, max 3600.
+- Keepalive: `normalizeKeepalive()` exists in both `main.js` and `renderer.js`; keep them identical. Default 5s, `0` disables, max 3600. The host dialog and Quick Connect both validate their keep-alive box with `parseKeepaliveInput()` in `renderer.js` (empty means the default; anything else must be a whole number in range).
 
 ### Host keys
 - Trust-on-first-use, keyed per `host:port` and per key type. Statuses are `unknown`, `changed` (red warning) and `new-key-type` (amber, e.g. RSA to Ed25519 after an upgrade).
@@ -77,7 +77,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### Recent connections and Quick Connect
 - `main.js` records a connection on ssh2's `ready` (`recordRecentConnection()`), so failed attempts never appear, and keeps the newest 10. Entries are built from a fixed set of fields, so a password, passphrase or key path can't reach the file.
-- The renderer sends `hostId` with `ssh-connect`. A saved host's entry follows it by id: the home view shows its current name, and a click reconnects it. One-off entries, and saved hosts deleted since, reopen Quick Connect filled in, because their passwords were never stored.
+- The renderer sends `hostId` with `ssh-connect`. A saved host's entry follows it by id: the home view shows its current name, and a click reconnects it. One-off entries, and saved hosts deleted since, reopen Quick Connect filled in (keep-alive included), because their passwords were never stored.
 - Quick Connect is a modal (`#quick-connect-modal`) opened by the lightning buttons in the sidebar and on the home view. The home view (`#home-view`) is shown through `setHomeVisible()` whenever no tab is, and reloads the list each time.
 
 ### Host right-click menu and the clipboard

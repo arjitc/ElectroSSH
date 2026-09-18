@@ -45,7 +45,7 @@ test('a successful connection is recorded, without its password', async () => {
   assert.equal(list.length, 1);
   const [entry] = list;
   assert.deepEqual(Object.keys(entry).sort(),
-    ['authType', 'host', 'hostId', 'id', 'keyId', 'lastConnected', 'name', 'port', 'username']);
+    ['authType', 'host', 'hostId', 'id', 'keepalive', 'keyId', 'lastConnected', 'name', 'port', 'username']);
   assert.equal(entry.host, '127.0.0.1');
   assert.equal(entry.port, server.port);
   assert.equal(entry.username, 'tester');
@@ -55,6 +55,14 @@ test('a successful connection is recorded, without its password', async () => {
 
   const raw = fs.readFileSync(app.storePath('recent_connections.json'), 'utf-8');
   assert.ok(!raw.includes('correct-horse-battery'), 'the password is not in the file');
+});
+
+test('a one-off session keeps the keep-alive it used, normalized', async () => {
+  resetRecent();
+  await connectOnce({ config: { username: 'kay', keepalive: 15 } });
+  await connectOnce({ config: { username: 'lee', keepalive: '-3' } });
+  const byUser = Object.fromEntries((await recent()).map((e) => [e.username, e.keepalive]));
+  assert.deepEqual(byUser, { kay: 15, lee: 5 });
 });
 
 test('a connection that fails is not recorded', async () => {
