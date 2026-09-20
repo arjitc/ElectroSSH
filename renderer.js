@@ -38,15 +38,30 @@ window.onload = function() {
     }
   }
 
-  // Inline SVG icons used across the sidebar
+  // Inline SVG icons: Lucide shapes on Lucide's 24x24 grid. The stroke width
+  // follows the display size, so every icon reads at the same weight however
+  // large it is drawn. The same sizes and widths are used in index.html.
+  const ICON_STROKE = { 12: 2.9, 14: 2.5, 16: 2.2, 18: 1.9 };
+  const icon = (size, body) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" `
+    + `stroke="currentColor" stroke-width="${ICON_STROKE[size]}" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+
   const ICONS = {
-    chevron: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 10.5 8l-5 4.5"/></svg>',
-    folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.8 12.5v-8a1 1 0 0 1 1-1h3l1.4 1.6h5a1 1 0 0 1 1 1v6.4a1 1 0 0 1-1 1h-9.4a1 1 0 0 1-1-1Z"/></svg>',
-    play: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5 12 8l-7 4.5z"/></svg>',
-    pencil: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.2 2.6 13.4 4.8 5.6 12.6 2.6 13.4l.8-3z"/></svg>',
-    bolt: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9.2 1.5 3.5 9h4.1l-.8 5.5L12.5 7H8.4z"/></svg>',
-    server: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.5 6.75 8.5 4.5 10.5M8.5 10.5h3"/></svg>',
-    close: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>'
+    chevron: icon(12, '<path d="m9 18 6-6-6-6"/>'),
+    folder: icon(14, '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
+    play: icon(14, '<polygon points="6 3 20 12 6 21"/>'),
+    pencil: icon(14, '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>'),
+    bolt: icon(14, '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>'),
+    server: icon(14, '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>'),
+    close: icon(12, '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+    copy: icon(14, '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
+    terminal: icon(12, '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>'),
+    sliders: icon(12, '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/>'
+      + '<line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/>'
+      + '<line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>'),
+    // A list with chevrons, and a tree: clearer here than Lucide's converging
+    // chevrons-down-up, which reads as an X at this size
+    collapseAll: icon(16, '<path d="m3 10 2.5-2.5L3 5"/><path d="m3 19 2.5-2.5L3 14"/><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/>'),
+    expandAll: icon(16, '<path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/>')
   };
 
   // Terminal palette, tuned to match the app chrome
@@ -405,7 +420,8 @@ window.onload = function() {
       tab = document.createElement('div');
       tab.className = 'tab';
       tab.id = 'tab-settings';
-      tab.innerHTML = `<span class="tab-label">Settings</span><span class="close-tab" title="Close">&times;</span>`;
+      tab.innerHTML = `<span class="tab-icon">${ICONS.sliders}</span>`
+        + `<span class="tab-label">Settings</span><span class="close-tab" title="Close">${ICONS.close}</span>`;
       tab.onclick = (e) => {
         if (e.target.closest('.close-tab')) {
           closeSettingsTab();
@@ -1019,6 +1035,7 @@ window.onload = function() {
     const headers = document.querySelectorAll('#saved-hosts-list .tree-group');
     const anyExpanded = Array.from(headers).some((el) => !el.classList.contains('collapsed'));
     btn.dataset.action = anyExpanded ? 'collapse' : 'expand';
+    btn.innerHTML = anyExpanded ? ICONS.collapseAll : ICONS.expandAll;
     btn.title = anyExpanded ? 'Collapse all groups' : 'Expand all groups';
     btn.setAttribute('aria-label', btn.title);
   }
@@ -1067,7 +1084,8 @@ window.onload = function() {
       button.setAttribute('role', 'menuitem');
       button.tabIndex = -1;
       button.disabled = !item.value;
-      button.innerHTML = `<span class="context-menu-label">${escapeHtml(item.label)}</span>`
+      button.innerHTML = `<span class="context-menu-icon">${ICONS.copy}</span>`
+        + `<span class="context-menu-label">${escapeHtml(item.label)}</span>`
         + `<span class="context-menu-value">${escapeHtml(item.value)}</span>`;
       button.addEventListener('mouseenter', () => { if (!button.disabled) button.focus(); });
       button.addEventListener('click', () => copyFromHostMenu(item.value));
@@ -1693,7 +1711,8 @@ window.onload = function() {
     tabEl.className = 'tab active';
     tabEl.id = `tab-${sessionId}`;
     tabEl.title = title;
-    tabEl.innerHTML = `<span class="tab-dot"></span><span class="tab-label">${escapeHtml(title)}</span><span class="close-tab" title="Close">&times;</span>`;
+    tabEl.innerHTML = `<span class="tab-dot"></span><span class="tab-icon">${ICONS.terminal}</span>`
+      + `<span class="tab-label">${escapeHtml(title)}</span><span class="close-tab" title="Close">${ICONS.close}</span>`;
 
     // Both ask first while the session is still connected
     tabEl.onclick = (e) => {
