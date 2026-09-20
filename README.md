@@ -4,6 +4,40 @@ Electron powered SSH application with Tabs and SSH Key support
 > [!WARNING]
 > Passwords saved against a host are stored in clear text currently. Please use with caution. Quick Connect asks for the password each time and never writes it to disk, and the recent connections list holds no passwords either.
 
+## Screenshots
+
+The hosts shown are made up, and the addresses come from the ranges reserved for documentation.
+
+### The host tree and recent connections
+
+Saved hosts on the left, grouped however you like; the home view lists your last 10 sessions.
+
+![Host tree and recent connections](docs/screenshots/01-first-load.png)
+
+### Host key verification
+
+The first connection to a server shows its fingerprint. Later connections are checked against what you accepted, and a changed key is flagged.
+
+![Verifying a host key](docs/screenshots/02-host-key.png)
+
+### Connecting to a host
+
+Double click a host to launch the session.
+
+![A connected session](docs/screenshots/03-connected.png)
+
+### Quick Connect
+
+For a one-off session you don't want to save. The password is never written to disk.
+
+![Quick Connect](docs/screenshots/04-quick-connect.png)
+
+### Copying a host's details
+
+Right-click a saved host for its IP address, display name or SSH port.
+
+![Copying host details](docs/screenshots/05-copy-menu.png)
+
 What works:
 
 - [x] Modern dark UI with a collapsible host tree in the sidebar
@@ -86,39 +120,5 @@ npm run test:all    # everything
 ```
 
 The tests run against local SSH servers they start themselves, so no network access or real host is needed.
-
-## Screenshots
-
-The hosts shown are made up, and the addresses come from the ranges reserved for documentation.
-
-### The host tree and recent connections
-
-Saved hosts on the left, grouped however you like; the home view lists your last 10 sessions.
-
-![Host tree and recent connections](docs/screenshots/01-first-load.png)
-
-### Host key verification
-
-The first connection to a server shows its fingerprint. Later connections are checked against what you accepted, and a changed key is flagged.
-
-![Verifying a host key](docs/screenshots/02-host-key.png)
-
-### Connecting to a host
-
-Double click a host to launch the session.
-
-![A connected session](docs/screenshots/03-connected.png)
-
-### Quick Connect
-
-For a one-off session you don't want to save. The password is never written to disk.
-
-![Quick Connect](docs/screenshots/04-quick-connect.png)
-
-### Copying a host's details
-
-Right-click a saved host for its IP address, display name or SSH port.
-
-![Copying host details](docs/screenshots/05-copy-menu.png)
 
 
