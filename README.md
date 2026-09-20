@@ -2,7 +2,7 @@
 Electron powered SSH application with Tabs and SSH Key support
 
 > [!WARNING]
-> Passwords saved into the application are saved in clear-text currently. Please use with caution.
+> Passwords saved against a host are stored in clear text currently. Please use with caution. Quick Connect asks for the password each time and never writes it to disk, and the recent connections list holds no passwords either.
 
 What works:
 
@@ -14,6 +14,9 @@ What works:
 - [x] Renaming Groups/Categories (pencil icon in the sidebar, or F2)
 - [x] Deleting Groups/Categories (only when the group has no hosts under it)
 - [x] Searching Hosts 
+- [x] Right-click a saved host to copy its IP address, display name or SSH port
+- [x] Recent connections on the home view: your last 10 sessions, newest first, one click to reconnect
+- [x] Quick Connect for one-off sessions: the lightning button in the sidebar, or Ctrl+Shift+N (Cmd+N on macOS)
 - [X] SSH Keys
 - [x] Host key verification: asks before trusting a new server, and warns loudly if a known server's key changes
 - [X] Right click to paste (or Ctrl+Shift+V)
@@ -24,14 +27,16 @@ What works:
 - [x] Keyboard shortcuts reference in Settings (also under the Settings menu)
 - [x] Reconnect option when connection disconnects
 - [x] Closing or reloading the app asks for confirmation while SSH sessions are open
-- [x] SSH Keepalive for NAT/CGNAT users (per-host, defaults to every 5 seconds, set 0 to disable)
+- [x] Closing a tab asks for confirmation while its session is connected
+- [x] SSH Keepalive for NAT/CGNAT users (per saved host and per Quick Connect session, defaults to every 5 seconds, set 0 to disable)
 - [x] Color supported in the console (for htop etc)
 - [x] Collapse/expand hosts listed under a Group/Category (state is remembered)
 - [x] Resizable sidebar
+- [x] App version shown beside the name in the sidebar
 
 What doesn't work/needs work (contributors welcome!):
 
-- [ ] Encrypting passwords saved
+- [ ] Encrypting passwords saved (the likely route is Electron's `safeStorage`, which encrypts with a key held by your OS account: DPAPI on Windows, the Keychain on macOS, the keyring on Linux)
 - [ ] Dark/Light Mode Themes
 - [ ] Auto save console log to file on connection
 - [ ] Ability to sort the order of the Group/Categories
@@ -39,7 +44,9 @@ What doesn't work/needs work (contributors welcome!):
 
 ## Terminal engine
 
-The terminal is [xterm.js](https://github.com/xtermjs/xterm.js) 6 (`@xterm/xterm`) with the fit and WebGL addons. The unscoped `xterm`/`xterm-addon-*` packages it used previously are deprecated.
+The terminal is [xterm.js](https://github.com/xtermjs/xterm.js) 6 (`@xterm/xterm`) with the fit, WebGL, search and web-links addons. The unscoped `xterm`/`xterm-addon-*` packages it used previously are deprecated.
+
+Icons are [Lucide](https://lucide.dev) shapes, written inline as SVG; no icon library or font is loaded.
 
 ## Building/Installing the application
 
@@ -82,30 +89,36 @@ The tests run against local SSH servers they start themselves, so no network acc
 
 ## Screenshots
 
-### Interface on first load
+The hosts shown are made up, and the addresses come from the ranges reserved for documentation.
 
-<img width="2474" height="1737" alt="image" src="https://github.com/user-attachments/assets/8d676076-3f48-490a-8ace-81afe1cc7e87" />
+### The host tree and recent connections
 
+Saved hosts on the left, grouped however you like; the home view lists your last 10 sessions.
 
-### Creating Groups (Categories) for Hosts
+![Host tree and recent connections](docs/screenshots/01-first-load.png)
 
-<img width="2474" height="1737" alt="image" src="https://github.com/user-attachments/assets/544d1f06-b180-48c9-816f-50cb7b7d17df" />
+### Host key verification
 
+The first connection to a server shows its fingerprint. Later connections are checked against what you accepted, and a changed key is flagged.
 
-### Adding Hosts
+![Verifying a host key](docs/screenshots/02-host-key.png)
 
-<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/323641ea-111b-4994-80a0-9f3d41dae306" />
+### Connecting to a host
 
+Double click a host to launch the session.
 
-### Connecting to a Host
+![A connected session](docs/screenshots/03-connected.png)
 
-Double click to launch the session
+### Quick Connect
 
-<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/067a237b-297b-4c38-bc0f-47de238b1c00" />
+For a one-off session you don't want to save. The password is never written to disk.
 
+![Quick Connect](docs/screenshots/04-quick-connect.png)
 
-### Editing or Deleting a Host
+### Copying a host's details
 
-<img width="3840" height="2280" alt="image" src="https://github.com/user-attachments/assets/0c3d9392-c9a1-429a-85a0-c9be66c14c72" />
+Right-click a saved host for its IP address, display name or SSH port.
+
+![Copying host details](docs/screenshots/05-copy-menu.png)
 
 
