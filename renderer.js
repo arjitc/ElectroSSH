@@ -54,7 +54,6 @@ window.onload = function() {
     server: icon(14, '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>'),
     close: icon(12, '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
     copy: icon(14, '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
-    terminal: icon(12, '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>'),
     sliders: icon(12, '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/>'
       + '<line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/>'
       + '<line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>'),
@@ -1711,7 +1710,7 @@ window.onload = function() {
     tabEl.className = 'tab active';
     tabEl.id = `tab-${sessionId}`;
     tabEl.title = title;
-    tabEl.innerHTML = `<span class="tab-dot"></span><span class="tab-icon">${ICONS.terminal}</span>`
+    tabEl.innerHTML = `<span class="tab-dot"></span>`
       + `<span class="tab-label">${escapeHtml(title)}</span><span class="close-tab" title="Close">${ICONS.close}</span>`;
 
     // Both ask first while the session is still connected
