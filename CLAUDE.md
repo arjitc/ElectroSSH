@@ -76,7 +76,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - In the renderer, `askSessionLoss()` shows one question at a time; a new question replaces the old one, which resolves as Cancel. Closing a tab (`requestCloseSession`) asks only when `session.connected` is true.
 
 ### Recent connections and Quick Connect
-- `main.js` records a connection on ssh2's `ready` (`recordRecentConnection()`), so failed attempts never appear, and keeps the newest 10. Entries are built from a fixed set of fields, so a password, passphrase or key path can't reach the file.
+- `main.js` records a connection on ssh2's `ready` (`recordRecentConnection()`), so failed attempts never appear, and keeps the newest 10. Entries are built from a fixed set of fields, so a password, passphrase or key path can't reach the file. The keep-alive is among them, so reopening a one-off session restores it; entries written before that have none, and fall back to the default.
 - The renderer sends `hostId` with `ssh-connect`. A saved host's entry follows it by id: the home view shows its current name, and a click reconnects it. One-off entries, and saved hosts deleted since, reopen Quick Connect filled in (keep-alive included), because their passwords were never stored.
 - Quick Connect is a modal (`#quick-connect-modal`) opened by the lightning buttons in the sidebar and on the home view. The home view (`#home-view`) is shown through `setHomeVisible()` whenever no tab is, and reloads the list each time.
 
@@ -107,6 +107,8 @@ Limits of synthetic input in the e2e tests:
 - With no windows left, the test process's event loop can stall, e.g. after `forcefullyCrashRenderer()` and a window close. The harness keeps a hidden spare window. `app.quit()` closes that spare too, so quitting tests call `keepAlive()` to put it back.
 - A crashed renderer freezes the main process while Windows deals with the crash: timers stop firing for anything from two seconds to past the runner's timeout (18s and 12s have both been measured), so a passing test can look hung. Disabling crash dumps (`disable-breakpad` in the harness) keeps dumps out of the temp directories but does not reliably shorten the freeze. What covers it: `waitFor()` takes a final look after its deadline, and `run.js` re-runs a file that timed out without failing a check.
 
+`host-menu.e2e.js` writes to the real system clipboard, since that is what the feature does. It saves the clipboard before it runs and puts it back afterwards.
+
 **Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
 
 ## History
@@ -117,4 +119,5 @@ The original app was built with Gemini. Since then (details in `git log`):
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
 - **Settings and safety:** keyboard shortcuts page; confirmation before closing or reloading the app, or closing a connected tab.
-- **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button; app version beside the name.
+- **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button, with its own keep-alive setting; app version beside the name.
+- **Copying:** right-click menu on a saved host for its address, display name or SSH port, copied through Electron's clipboard in main.
