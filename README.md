@@ -96,7 +96,7 @@ npm install
 npm run dist:win
 ```
 
-## Running the application from source
+## Running/building the application from source
 
 Required only the first time
 
@@ -104,11 +104,18 @@ Required only the first time
 npm install
 ```
 
-and then,
+and then to run,
 
 ```
 npm start
 ```
+
+or to build an exe for example on Windows,
+
+```
+npm run dist:win
+```
+
 
 ## Running the tests
 
