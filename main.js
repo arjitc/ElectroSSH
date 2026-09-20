@@ -36,6 +36,15 @@ function normalizeKeepalive(value) {
 // Default SSH directory for discovery and generation
 const defaultSSHDir = path.join(process.env.HOME || process.env.USERPROFILE || __dirname, '.ssh');
 
+// A session outlives the window it belonged to: channels close, keepalives
+// fail and errors arrive after the page is gone. Sending to a destroyed
+// webContents throws, and an uncaught exception in the main process puts up
+// Electron's "A JavaScript error occurred" dialog, which blocks the app. Every
+// message to the page goes through here.
+function sendToPage(sender, channel, payload) {
+  if (sender && !sender.isDestroyed()) sender.send(channel, payload);
+}
+
 function readHostStore() {
   let store = { hosts: [], groups: [defaultGroup] };
   if (!fs.existsSync(hostsFilePath)) return store;
@@ -437,7 +446,7 @@ function confirmSessionLoss(win, action, count) {
       if (acknowledged) return;
       pendingSessionLossPrompts.delete(requestId);
       // In case the page does show its dialog late, don't leave it behind
-      if (!win.isDestroyed()) win.webContents.send('session-loss-prompt-cancel', { requestId });
+      if (!win.isDestroyed()) sendToPage(win.webContents, 'session-loss-prompt-cancel', { requestId });
       nativeConfirmSessionLoss(win, action, count).then(resolve);
     }, SESSION_LOSS_ACK_MS);
 
@@ -453,7 +462,7 @@ function confirmSessionLoss(win, action, count) {
       }
     });
 
-    win.webContents.send('session-loss-prompt', { requestId, action, sessionIds: Object.keys(sessions) });
+    sendToPage(win.webContents, 'session-loss-prompt', { requestId, action, sessionIds: Object.keys(sessions) });
   });
 }
 
@@ -966,7 +975,7 @@ function buildMenu() {
         return new Promise((resolve) => {
           const requestId = `${payload.sessionId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
           pendingHostKeyPrompts.set(requestId, { sessionId: payload.sessionId, resolve });
-          sender.send('host-key-prompt', { requestId, ...payload });
+          sendToPage(sender, 'host-key-prompt', { requestId, ...payload });
         });
       }
 
@@ -977,7 +986,7 @@ function buildMenu() {
           if (pending.sessionId !== sessionId) continue;
           pendingHostKeyPrompts.delete(requestId);
           pending.resolve('reject');
-          if (sender && !sender.isDestroyed()) sender.send('host-key-prompt-cancel', { requestId });
+          sendToPage(sender, 'host-key-prompt-cancel', { requestId });
         }
       }
 
@@ -1048,7 +1057,7 @@ function buildMenu() {
           clearHandshakeTimer();
           handshakeTimer = setTimeout(() => {
             if (!isCurrent()) return;
-            event.sender.send('ssh-error', { sessionId, message: 'Timed out while waiting for handshake' });
+            sendToPage(event.sender, 'ssh-error', { sessionId, message: 'Timed out while waiting for handshake' });
             conn.destroy();
           }, HANDSHAKE_TIMEOUT_MS);
         };
@@ -1104,7 +1113,7 @@ function buildMenu() {
           clearHandshakeTimer();
           // Before 'Connected' goes out, so the renderer's next read includes it
           recordRecentConnection(config, savedHostId);
-          event.sender.send('ssh-status', { sessionId, status: 'Connected' });
+          sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Connected' });
 
           // Open the shell at whatever size the terminal is *now*, which may
           // differ from the size sent with the connect request if the window
@@ -1112,7 +1121,7 @@ function buildMenu() {
           const current = sessions[sessionId] ? sessions[sessionId].size : size;
           conn.shell({ term: 'xterm-256color', cols: current.cols, rows: current.rows }, (err, stream) => {
             if (err) {
-              event.sender.send('ssh-error', { sessionId, message: err.message });
+              sendToPage(event.sender, 'ssh-error', { sessionId, message: err.message });
               delete sessions[sessionId];
               return;
             }
@@ -1122,21 +1131,21 @@ function buildMenu() {
             applyWindowSize(sessions[sessionId]);
 
             stream.on('data', (data) => {
-              event.sender.send('ssh-data', { sessionId, data: data.toString('utf-8') });
+              sendToPage(event.sender, 'ssh-data', { sessionId, data: data.toString('utf-8') });
             });
             
             stream.on('close', (code, signal) => {
-              event.sender.send('ssh-status', { sessionId, status: 'Closed', code, signal });
+              sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Closed', code, signal });
               if (sessions[sessionId]) delete sessions[sessionId];
             });
             
             stream.on('exit', (code, signal) => {
-              event.sender.send('ssh-status', { sessionId, status: 'Exit', code, signal });
+              sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Exit', code, signal });
             });
             
             // Handle window change requests from the renderer process
             stream.on('window-change', () => {
-              event.sender.send('ssh-status', { sessionId, status: 'window-change' });
+              sendToPage(event.sender, 'ssh-status', { sessionId, status: 'window-change' });
             });
           });
         });
@@ -1148,7 +1157,7 @@ function buildMenu() {
           const message = hostKeyRejected
             ? 'Connection cancelled: the host key was not accepted.'
             : err.message;
-          event.sender.send('ssh-error', { sessionId, message });
+          sendToPage(event.sender, 'ssh-error', { sessionId, message });
           delete sessions[sessionId];
         });
 
@@ -1156,7 +1165,7 @@ function buildMenu() {
           clearHandshakeTimer();
           if (!isCurrent()) return;
           cancelHostKeyPrompts(sessionId, event.sender);
-          event.sender.send('ssh-status', { sessionId, status: 'Disconnected' });
+          sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Disconnected' });
           delete sessions[sessionId];
         });
 
@@ -1165,7 +1174,7 @@ function buildMenu() {
           if (!isCurrent()) return;
           // e.g. the server's LoginGraceTime expired while the prompt was open
           cancelHostKeyPrompts(sessionId, event.sender);
-          event.sender.send('ssh-status', { sessionId, status: 'Closed', hadError });
+          sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Closed', hadError });
           delete sessions[sessionId];
         });
         
@@ -1217,7 +1226,7 @@ function buildMenu() {
           conn.connect(connConfig);
         } catch (error) {
           clearHandshakeTimer();
-          event.sender.send('ssh-error', { sessionId, message: error.message });
+          sendToPage(event.sender, 'ssh-error', { sessionId, message: error.message });
           if (isCurrent()) delete sessions[sessionId];
         }
       });
@@ -1228,10 +1237,10 @@ function buildMenu() {
           try {
             session.stream.write(data);
           } catch (err) {
-            event.sender.send('ssh-error', { sessionId, message: `write error: ${err.message}` });
+            sendToPage(event.sender, 'ssh-error', { sessionId, message: `write error: ${err.message}` });
           }
         } else {
-          event.sender.send('ssh-error', { sessionId, message: 'No active stream for session' });
+          sendToPage(event.sender, 'ssh-error', { sessionId, message: 'No active stream for session' });
         }
       });
       

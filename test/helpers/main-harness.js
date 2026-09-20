@@ -24,9 +24,14 @@ function loadMain({ shell = {}, dialog = {}, clipboard = {} } = {}) {
   const sent = [];            // everything main sends to "the renderer"
   const listeners = [];
 
+  // Electron throws on a send to a webContents that has been destroyed, which
+  // is what happens when a session outlives its window; destroySender() makes
+  // the stub behave the same way.
+  let senderDestroyed = false;
   const sender = {
-    isDestroyed: () => false,
+    isDestroyed: () => senderDestroyed,
     send: (channel, args) => {
+      if (senderDestroyed) throw new TypeError('Object has been destroyed');
       sent.push({ channel, args });
       listeners.forEach((fn) => fn(channel, args));
     }
@@ -115,6 +120,8 @@ function loadMain({ shell = {}, dialog = {}, clipboard = {} } = {}) {
     emit: (channel, payload) => ipcOn[channel](event, payload),
     /** Run fn(channel, args) for every message main sends to the renderer. */
     onSend: (fn) => listeners.push(fn),
+    /** The window has closed: any further send throws, as Electron's does. */
+    destroySender: () => { senderDestroyed = true; },
     storePath: (name) => path.join(userData, name),
     readStore: (name) => {
       try { return JSON.parse(fs.readFileSync(path.join(userData, name), 'utf-8')); } catch (e) { return null; }

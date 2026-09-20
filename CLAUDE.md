@@ -51,6 +51,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 ### SSH connection lifecycle (`ssh-connect` in `main.js`)
 - ssh2's `readyTimeout` is `0`, replaced by a handshake timer (`HANDSHAKE_TIMEOUT_MS`) that pauses while a host key prompt is open. ssh2's own timer counts the time a person spends reading the prompt.
 - On reconnect, the old connection's `end`/`close` events arrive after the new one has taken the same session id. Handlers act only when `isCurrent()` is true.
+- Every message to the page goes through `sendToPage()`, which checks the webContents still exists. A session outlives its window — channels close and errors arrive after the page is gone — and Electron throws on a send to a destroyed webContents. That exception is uncaught in main, so it puts up the "A JavaScript error occurred in the main process" dialog, which blocks the app and, under the e2e harness, looks exactly like a hung test.
 - Resizes are never dropped. A `term-resize` that arrives before the shell exists is stored and applied by `applyWindowSize()` when the stream opens (dropping them made htop draw short). The renderer also re-syncs size on `Connected`.
 - ssh2 re-runs the host verifier on every rekey. `acceptedHostKey` stops "Connect Once" from prompting again mid-session.
 - Keepalive: `normalizeKeepalive()` exists in both `main.js` and `renderer.js`; keep them identical. Default 5s, `0` disables, max 3600. The host dialog and Quick Connect both validate their keep-alive box with `parseKeepaliveInput()` in `renderer.js` (empty means the default; anything else must be a whole number in range).
@@ -86,6 +87,12 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### Groups
 - `readHostStore()` re-creates the `default` group whenever it is missing, so it can't be deleted. `delete-group` refuses groups that still have hosts; this is enforced in `main.js`, not only by the disabled button.
+
+### Icons
+- All icons are inline SVG with [Lucide](https://lucide.dev) shapes on Lucide's `0 0 24 24` grid, `fill="none"`, `stroke="currentColor"`, round caps and joins. No icon library or font is loaded.
+- Stroke width follows the display size so every icon reads at the same weight: 12 → 2.9, 14 → 2.5, 16 → 2.2, 18 → 1.9. `ICON_STROKE` and the `icon()` helper in `renderer.js` apply this; `index.html` spells it out per SVG.
+- The sidebar's collapse-all toggle uses `list-collapse`/`list-tree` rather than Lucide's `chevrons-down-up`, whose converging chevrons read as an X at 16px. `updateToggleAllButton()` swaps it with the state.
+- A few icons exist in both `index.html` and the `ICONS` map (the bolt, the ×, the plus): keep them in step.
 
 ## Quirks
 
