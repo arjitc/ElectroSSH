@@ -8,9 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const { utils } = require('ssh2');
 const { start, check, run, waitFor } = require('./harness');
-const { startSshServer } = require('../helpers/ssh-server');
+const { startSshServer, generateKey } = require('../helpers/ssh-server');
 
 const PASSPHRASE = 'correct horse battery';
 const twoFactor = (ctx) => {
@@ -50,7 +49,7 @@ run(async () => {
   // --- A saved host whose key is encrypted, added the way a person would:
   // through Settings, so the page knows the key
   const keyPath = path.join(app.getPath('userData'), 'id_ed25519_locked');
-  fs.writeFileSync(keyPath, utils.generateKeyPairSync('ed25519', { passphrase: PASSPHRASE, cipher: 'aes256-ctr' }).private);
+  fs.writeFileSync(keyPath, generateKey('ed25519', { passphrase: PASSPHRASE, cipher: 'aes256-ctr' }));
   await t.js(`document.getElementById('existing-key-path').value = ${JSON.stringify(keyPath)};
     document.getElementById('existing-key-name').value = 'locked key';
     document.getElementById('btn-add-existing-key').click(); 'ok'`);

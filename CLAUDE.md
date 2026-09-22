@@ -139,6 +139,8 @@ Limits of synthetic input in the e2e tests:
 
 A test server that accepts any login can hide a broken auth path: a host whose key the page doesn't know silently falls back to password auth, and such a server lets it in. Tests of key or keyboard-interactive login use `authenticate` to accept only that method.
 
+Make test keys, host or client, with `generateKey()` from `test/helpers/ssh-server.js`, never ssh2's `utils.generateKeyPairSync` directly. About one Ed25519 key in 256 from ssh2 is malformed (it strips a leading zero byte from the public key) and ssh2's own parser refuses it; drawn at random in a dozen places, that failed some test in roughly one `npm test` run in twenty. `generateKey()` draws again until the key parses.
+
 Scratch scripts run under Electron (screenshots, one-off probes) need absolute paths to the project's modules, and a `process.on('uncaughtException')` that logs and exits; otherwise an error opens a modal dialog on the desktop. `capturePage()` on a window behind others can return a stale frame, so bring it to the front and call `webContents.invalidate()` before capturing.
 
 **Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.

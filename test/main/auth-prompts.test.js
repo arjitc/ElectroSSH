@@ -9,9 +9,8 @@ const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { utils } = require('ssh2');
 const { loadMain, waitFor, sleep } = require('../helpers/main-harness');
-const { startSshServer } = require('../helpers/ssh-server');
+const { startSshServer, generateKey } = require('../helpers/ssh-server');
 
 const PASSPHRASE = 'correct horse battery';
 const app = loadMain();
@@ -50,7 +49,7 @@ before(async () => {
   kbdServer = await startSshServer({ authenticate: passwordOnlyKbd });
   otpServer = await startSshServer({ authenticate: twoFactor });
   keyPath = path.join(app.userData, 'id_ed25519_locked');
-  fs.writeFileSync(keyPath, utils.generateKeyPairSync('ed25519', { passphrase: PASSPHRASE, cipher: 'aes256-ctr' }).private);
+  fs.writeFileSync(keyPath, generateKey('ed25519', { passphrase: PASSPHRASE, cipher: 'aes256-ctr' }));
 });
 after(async () => {
   await Promise.all([keyServer.close(), kbdServer.close(), otpServer.close()]);
