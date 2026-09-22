@@ -164,25 +164,20 @@ window.onload = function() {
 
   const IS_MAC = /Mac/i.test(navigator.userAgent);
 
-  // Send the clipboard to the remote shell as if it had been typed.
-  async function pasteIntoSession(sessionId, term) {
+  // Right-click paste. term.paste() turns line endings into \r, and when the
+  // remote program has switched on bracketed paste (bash, zsh and vim do),
+  // wraps the text so a multi-line paste arrives as one block to review,
+  // rather than running each line the moment it lands. The text then goes out
+  // through onData like typing does. (Keyboard paste needs none of this: see
+  // the key handler in createSession.)
+  async function pasteIntoTerminal(term) {
     try {
       const pasteText = await readClipboardText();
       if (!pasteText) return;
-
-      // Convert newlines to '\r' so the backend receives Enter-like input as if typed
-      const normalized = pasteText.replace(/\r\n|\r|\n/g, '\r');
-
-      // Send to backend in chunks so large pastes don't overload buffers
-      const CHUNK = 2048;
-      for (let i = 0; i < normalized.length; i += CHUNK) {
-        window.electronAPI.sendInput({ sessionId, data: normalized.slice(i, i + CHUNK) });
-      }
-
-      // Focus the terminal so subsequent keys go to it
+      term.paste(pasteText);
       term.focus();
     } catch (err) {
-      console.error("Failed to read/paste clipboard:", err);
+      console.error('Failed to read/paste clipboard:', err);
     }
   }
 
@@ -1688,10 +1683,11 @@ window.onload = function() {
         return false;
       }
 
-      if (key === 'v') {
-        pasteIntoSession(sessionId, term);
-        return false;
-      }
+      // Ctrl+Shift+V (Cmd+V) already fires the browser's own paste event,
+      // which xterm handles itself, bracketed paste included. Returning false
+      // only stops xterm sending the keystroke to the shell; pasting here as
+      // well used to paste everything twice.
+      if (key === 'v') return false;
 
       return true;
     });
@@ -1701,7 +1697,7 @@ window.onload = function() {
       if (activeSessionId !== sessionId) return;
       e.preventDefault();
       e.stopPropagation();
-      pasteIntoSession(sessionId, term);
+      pasteIntoTerminal(term);
     });
 
     // Create Tab UI

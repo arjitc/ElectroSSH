@@ -54,7 +54,7 @@ function loadMain({ shell = {}, dialog = {}, clipboard = {} } = {}) {
     },
     Menu: { buildFromTemplate: () => ({}), setApplicationMenu: () => {} },
     shell: { openExternal: async () => {}, ...shell },
-    clipboard: { writeText: () => {}, ...clipboard },
+    clipboard: { writeText: () => {}, readText: () => '', ...clipboard },
     dialog: {
       showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
       showMessageBox: async (win, opts) => ({ response: opts.cancelId }),

@@ -26,8 +26,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ackSessionLossPrompt: (requestId) => ipcRenderer.send('session-loss-ack', { requestId }),
   respondSessionLossPrompt: (requestId, confirmed) => ipcRenderer.send('session-loss-response', { requestId, confirmed }),
 
-  // Copy text through Electron's clipboard (works without window focus)
+  // Copy and paste through Electron's clipboard (works without window focus)
   writeClipboard: (text) => ipcRenderer.invoke('clipboard-write', text),
+  readClipboard: () => ipcRenderer.invoke('clipboard-read'),
 
   // Links clicked in terminal output (http/https only, checked in main)
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

@@ -50,7 +50,9 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### SSH connection lifecycle (`ssh-connect` in `main.js`)
 - ssh2's `readyTimeout` is `0`, replaced by a handshake timer (`HANDSHAKE_TIMEOUT_MS`) that pauses while a host key prompt is open. ssh2's own timer counts the time a person spends reading the prompt.
-- On reconnect, the old connection's `end`/`close` events arrive after the new one has taken the same session id. Handlers act only when `isCurrent()` is true.
+- On reconnect, the old connection's `end`/`close` events arrive after the new one has taken the same session id. Handlers act only when `isCurrent()` is true — the shell stream's `data`/`close`/`exit` handlers and the `ready` and shell-open callbacks included. A late `close` from the old stream once reported "Closed" on the new tab and deleted the new session, and the reconnect then failed without a word.
+- `Connected` is sent once the shell has opened, not at `ready`, and `term-input` with no stream is dropped silently. Keys typed in between used to come back as `ssh-error`, which marked a working tab disconnected.
+- Output is decoded with one `StringDecoder` per stream. SSH splits packets at arbitrary bytes, and decoding chunk by chunk turned a character cut in two into `��`.
 - Every message to the page goes through `sendToPage()`, which checks the webContents still exists. A session outlives its window — channels close and errors arrive after the page is gone — and Electron throws on a send to a destroyed webContents. That exception is uncaught in main, so it puts up the "A JavaScript error occurred in the main process" dialog, which blocks the app and, under the e2e harness, looks exactly like a hung test.
 - Resizes are never dropped. A `term-resize` that arrives before the shell exists is stored and applied by `applyWindowSize()` when the stream opens (dropping them made htop draw short). The renderer also re-syncs size on `Connected`.
 - ssh2 re-runs the host verifier on every rekey. `acceptedHostKey` stops "Connect Once" from prompting again mid-session.
@@ -83,7 +85,11 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### Host right-click menu and the clipboard
 - Right-clicking a saved host opens `#host-context-menu`, an in-page menu (not a native one) built by `openHostMenu()`. It copies the address ("Copy IP address", or "Copy hostname" for a DNS name), the display name or the SSH port, and leaves a brief "Copied …" note. Shift+F10 and the Menu key open it from the host row's `keydown`.
-- Copying goes through main's `clipboard-write` (Electron's `clipboard`), because `navigator.clipboard.writeText` refuses while the window isn't focused. `writeClipboardText()` resolves true only once the text is on the clipboard.
+- Copying goes through main's `clipboard-write` (Electron's `clipboard`), because `navigator.clipboard.writeText` refuses while the window isn't focused. `writeClipboardText()` resolves true only once the text is on the clipboard. Reading for right-click paste goes through `clipboard-read` for the same reason.
+
+### Paste
+- Right-click paste reads the clipboard and calls `term.paste()`, which turns line endings into `\r` and, when the remote program has turned on bracketed paste (bash, zsh, vim), wraps the text so a multi-line paste arrives as one block instead of running line by line. Never write pasted text to the stream directly.
+- Ctrl+Shift+V (Cmd+V) is left to the browser's native paste event, which xterm handles itself. The key handler returns `false` only so the keystroke doesn't reach the shell; pasting there as well pasted everything twice.
 
 ### Groups
 - `readHostStore()` re-creates the `default` group whenever it is missing, so it can't be deleted. `delete-group` refuses groups that still have hosts; this is enforced in `main.js`, not only by the disabled button.

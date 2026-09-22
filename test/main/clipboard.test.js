@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const { loadMain } = require('../helpers/main-harness');
 
 const written = [];
-const app = loadMain({ clipboard: { writeText: (text) => written.push(text) } });
+const app = loadMain({ clipboard: { writeText: (text) => written.push(text), readText: () => 'pasted text' } });
 after(() => app.cleanup());
 
 test('copies a string', async () => {
@@ -22,6 +22,10 @@ test('refuses anything that is not a string', async () => {
     assert.equal(await app.invoke('clipboard-write', value), false, String(value));
   }
   assert.equal(written.length, before);
+});
+
+test('clipboard-read returns the clipboard text, for right-click paste', async () => {
+  assert.equal(await app.invoke('clipboard-read'), 'pasted text');
 });
 
 test('refuses absurdly large text', async () => {

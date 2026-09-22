@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { StringDecoder } = require('string_decoder');
 const { Client, utils: sshUtils } = require('ssh2');
 
 let mainWindow;
@@ -538,6 +539,9 @@ ipcMain.handle('clipboard-write', (event, text) => {
   clipboard.writeText(text);
   return true;
 });
+// Read it for right-click paste, for the same reason: readText() in the page
+// fails whenever the window isn't focused.
+ipcMain.handle('clipboard-read', () => clipboard.readText());
 
 // Open a link from terminal output in the user's browser. That text is written
 // by the remote host, so only web URLs are allowed: shell.openExternal will
@@ -1111,18 +1115,28 @@ function buildMenu() {
 
         conn.on('ready', () => {
           clearHandshakeTimer();
+          // Replaced by a reconnect while the handshake was in flight
+          if (!isCurrent()) {
+            conn.end();
+            return;
+          }
           // Before 'Connected' goes out, so the renderer's next read includes it
           recordRecentConnection(config, savedHostId);
-          sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Connected' });
 
           // Open the shell at whatever size the terminal is *now*, which may
           // differ from the size sent with the connect request if the window
           // was resized while the handshake was in flight.
-          const current = sessions[sessionId] ? sessions[sessionId].size : size;
+          const current = sessions[sessionId].size;
           conn.shell({ term: 'xterm-256color', cols: current.cols, rows: current.rows }, (err, stream) => {
+            // A reconnect can take over the session id while the shell opens
+            if (!isCurrent()) {
+              if (stream) stream.close();
+              return;
+            }
             if (err) {
               sendToPage(event.sender, 'ssh-error', { sessionId, message: err.message });
               delete sessions[sessionId];
+              conn.end(); // authenticated, but nothing left to use it for
               return;
             }
             sessions[sessionId].stream = stream;
@@ -1130,21 +1144,42 @@ function buildMenu() {
             // Catch any resize that landed between 'ready' and the shell opening
             applyWindowSize(sessions[sessionId]);
 
+            // Only now is there somewhere for keystrokes to go. Sent at 'ready',
+            // input typed before the shell opened failed and the tab was marked
+            // disconnected while the session worked.
+            sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Connected' });
+
+            // SSH splits output at arbitrary byte boundaries, which can fall
+            // inside a multi-byte UTF-8 character. Decoded chunk by chunk, both
+            // halves became U+FFFD; the decoder holds the unfinished bytes over
+            // to the next chunk.
+            const decoder = new StringDecoder('utf8');
+
+            // Stream events can arrive after a reconnect has replaced this
+            // connection. Only the current one may report, or remove the
+            // session: a late 'close' used to delete the new connection's entry.
             stream.on('data', (data) => {
-              sendToPage(event.sender, 'ssh-data', { sessionId, data: data.toString('utf-8') });
+              if (!isCurrent()) return;
+              const text = decoder.write(data);
+              if (text) sendToPage(event.sender, 'ssh-data', { sessionId, data: text });
             });
             
             stream.on('close', (code, signal) => {
+              if (!isCurrent()) return;
+              const rest = decoder.end();
+              if (rest) sendToPage(event.sender, 'ssh-data', { sessionId, data: rest });
               sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Closed', code, signal });
-              if (sessions[sessionId]) delete sessions[sessionId];
+              delete sessions[sessionId];
             });
             
             stream.on('exit', (code, signal) => {
+              if (!isCurrent()) return;
               sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Exit', code, signal });
             });
             
             // Handle window change requests from the renderer process
             stream.on('window-change', () => {
+              if (!isCurrent()) return;
               sendToPage(event.sender, 'ssh-status', { sessionId, status: 'window-change' });
             });
           });
@@ -1233,14 +1268,14 @@ function buildMenu() {
       
       ipcMain.on('term-input', (event, { sessionId, data }) => {
         const session = sessions[sessionId];
-        if (session && session.stream) {
-          try {
-            session.stream.write(data);
-          } catch (err) {
-            sendToPage(event.sender, 'ssh-error', { sessionId, message: `write error: ${err.message}` });
-          }
-        } else {
-          sendToPage(event.sender, 'ssh-error', { sessionId, message: 'No active stream for session' });
+        // Keys typed before the shell opens, or after the session has ended,
+        // have nowhere to go. Reporting them as errors put a failure banner on
+        // a tab that was still connecting.
+        if (!session || !session.stream) return;
+        try {
+          session.stream.write(data);
+        } catch (err) {
+          sendToPage(event.sender, 'ssh-error', { sessionId, message: `write error: ${err.message}` });
         }
       });
       
