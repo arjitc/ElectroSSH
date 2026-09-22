@@ -6,8 +6,25 @@
 const crypto = require('crypto');
 const { Server, utils } = require('ssh2');
 
-function generateHostKey(type = 'ed25519', options) {
-  return utils.generateKeyPairSync(type, options).private;
+// ssh2's generateKeyPairSync strips every leading zero byte from an Ed25519
+// public key, so about one key in 256 comes out 31 bytes long and ssh2's own
+// parser refuses it ("Malformed OpenSSH private key"). Handed to a Server, or
+// written out as a client key, that failed whichever test drew it: roughly
+// one full run in twenty. Such a key is discarded and another drawn.
+const KEYGEN_ATTEMPTS = 10;
+
+/**
+ * A private key in OpenSSH format, for a server or a client. `options` go to
+ * ssh2's generateKeyPairSync: `bits`, or `passphrase` and `cipher` to encrypt it.
+ */
+function generateKey(type = 'ed25519', options = {}) {
+  let parsed;
+  for (let attempt = 0; attempt < KEYGEN_ATTEMPTS; attempt++) {
+    const key = utils.generateKeyPairSync(type, options).private;
+    parsed = utils.parseKey(key, options.passphrase);
+    if (!(parsed instanceof Error)) return key;
+  }
+  throw new Error(`ssh2 generated ${KEYGEN_ATTEMPTS} ${type} keys it cannot parse: ${parsed.message}`);
 }
 
 /**
@@ -28,7 +45,7 @@ function fingerprintOf(privateKey) {
  *   accepts every method by default. Pass one to act like a keyboard-interactive
  *   or two-factor server.
  */
-function startSshServer({ hostKey = generateHostKey(), port = 0, onShell, authenticate = (ctx) => ctx.accept() } = {}) {
+function startSshServer({ hostKey = generateKey(), port = 0, onShell, authenticate = (ctx) => ctx.accept() } = {}) {
   const state = {
     connectionsAccepted: 0,
     openConnections: 0,
@@ -89,4 +106,4 @@ function startSshServer({ hostKey = generateHostKey(), port = 0, onShell, authen
   });
 }
 
-module.exports = { startSshServer, generateHostKey, fingerprintOf };
+module.exports = { startSshServer, generateKey, fingerprintOf };

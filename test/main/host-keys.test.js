@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { loadMain, waitFor } = require('../helpers/main-harness');
-const { startSshServer, generateHostKey, fingerprintOf } = require('../helpers/ssh-server');
+const { startSshServer, generateKey, fingerprintOf } = require('../helpers/ssh-server');
 
 const app = loadMain();
 const KNOWN_HOSTS = 'known_hosts.json';
@@ -26,9 +26,9 @@ app.onSend((channel, args) => {
 const respondWith = (decision) => { answer = (p) => app.answerHostKey(p.requestId, decision); };
 const promptsSince = (i) => prompts.slice(i);
 
-const keyA = generateHostKey();                       // the genuine server
-const keyB = generateHostKey();                       // an impostor, or a rebuilt box
-const keyRsa = generateHostKey('rsa', { bits: 2048 }); // same host, other key type
+const keyA = generateKey();                       // the genuine server
+const keyB = generateKey();                       // an impostor, or a rebuilt box
+const keyRsa = generateKey('rsa', { bits: 2048 }); // same host, other key type
 let port;
 let hostId;
 let server;
