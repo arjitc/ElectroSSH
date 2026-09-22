@@ -53,6 +53,8 @@ What works:
 - [x] Quick Connect for one-off sessions: the lightning button in the sidebar, or Ctrl+Shift+N (Cmd+N on macOS)
 - [X] SSH Keys
 - [x] Host key verification: asks before trusting a new server, and warns loudly if a known server's key changes
+- [x] Passphrase-protected SSH keys: the passphrase is asked for when needed and never saved
+- [x] Keyboard-interactive and two-factor login: one-time code prompts are shown as the server words them
 - [X] Right click to paste (or Ctrl+Shift+V)
 - [x] Left click select to copy (or Ctrl+Shift+C)
 - [x] Clickable links in terminal output: Ctrl+click (Cmd+click on macOS) opens http/https links in your browser
@@ -60,6 +62,7 @@ What works:
 - [x] Terminal font size: Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+mouse wheel (remembered between sessions)
 - [x] Keyboard shortcuts reference in Settings (also under the Settings menu)
 - [x] Reconnect option when connection disconnects
+- [x] Connection status at a glance: amber while connecting, green when live, red when dropped
 - [x] Closing or reloading the app asks for confirmation while SSH sessions are open
 - [x] Closing a tab asks for confirmation while its session is connected
 - [x] SSH Keepalive for NAT/CGNAT users (per saved host and per Quick Connect session, defaults to every 5 seconds, set 0 to disable)

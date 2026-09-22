@@ -423,6 +423,29 @@
     <span id="link-hint-action" class="link-hint-action"></span>
   </div>
 
+  <!-- Questions asked while connecting: a key's passphrase, or a server's
+       keyboard-interactive prompts (a password, a one-time code). Before the
+       host key modal in the DOM, so a host key prompt stacks above it. -->
+  <div id="auth-prompt-modal" class="modal-overlay hidden">
+    <div class="modal-content auth-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-prompt-title">
+      <div class="modal-header">
+        <h3 id="auth-prompt-title">Sign in</h3>
+        <p id="auth-prompt-target"></p>
+      </div>
+      <div class="modal-body">
+        <p id="auth-prompt-instructions" class="auth-prompt-instructions hidden"></p>
+        <div id="auth-prompt-fields"></div>
+        <div id="auth-prompt-error" class="form-error"></div>
+        <p id="auth-prompt-queue" class="field-note hidden"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-auth-cancel" class="btn">Cancel</button>
+        <div class="spacer"></div>
+        <button id="btn-auth-submit" class="btn btn-primary">Continue</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Host Key Verification Modal -->
   <div id="host-key-modal" class="modal-overlay hidden">
     <div class="modal-content host-key-dialog" role="alertdialog" aria-modal="true"

@@ -562,9 +562,16 @@ ipcMain.handle('open-external', async (event, rawUrl) => {
   return { ok: true };
 });
 
+const REPO_URL = 'https://github.com/arjitc/ElectroSSH';
+
+// Open a page of the Settings tab ('keys' or 'shortcuts')
+function openSettingsPage(page) {
+  if (mainWindow && !mainWindow.isDestroyed()) sendToPage(mainWindow.webContents, 'open-settings', page);
+}
+
 function buildMenu() {
   const isMac = process.platform === 'darwin';
-  
+
   const template = [
     ...(isMac
       ? [{
@@ -634,52 +641,18 @@ function buildMenu() {
           {
             label: 'Settings',
             submenu: [
-              {
-                label: 'Manage SSH Keys',
-                accelerator: 'CmdOrCtrl+,',
-                click: () => {
-                  if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('open-settings', 'keys');
-                  }
-                }
-              },
-              {
-                label: 'Keyboard Shortcuts',
-                click: () => {
-                  if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('open-settings', 'shortcuts');
-                  }
-                }
-              }
+              { label: 'Manage SSH Keys', accelerator: 'CmdOrCtrl+,', click: () => openSettingsPage('keys') },
+              { label: 'Keyboard Shortcuts', click: () => openSettingsPage('shortcuts') }
             ]
           },
           {
             role: 'help',
             submenu: [
-              {
-                label: 'Learn More',
-                click: async () => {
-                  await shell.openExternal('https://electronjs.org');
-                }
-              },
-              {
-                label: 'Documentation',
-                click: async () => {
-                  await shell.openExternal('https://electronjs.org/docs');
-                }
-              },
-              {
-                label: 'Community Discussions',
-                click: async () => {
-                  await shell.openExternal('https://www.electronjs.org/community');
-                }
-              },
-              {
-                label: 'Search Issues',
-                click: async () => {
-                  await shell.openExternal('https://github.com/electron/electron/issues');
-                }
-              }
+              { label: 'ElectroSSH on GitHub', click: () => shell.openExternal(REPO_URL) },
+              { label: 'Release Notes', click: () => shell.openExternal(`${REPO_URL}/releases`) },
+              { label: 'Report a Problem', click: () => shell.openExternal(`${REPO_URL}/issues`) },
+              { type: 'separator' },
+              { label: 'Keyboard Shortcuts', click: () => openSettingsPage('shortcuts') }
             ]
           }
         ];
@@ -691,6 +664,12 @@ function buildMenu() {
       app.whenReady().then(() => {
         createWindow();
         buildMenu();
+        // macOS keeps the app running after its window closes (see
+        // 'window-all-closed' below); clicking the Dock icon brings it back.
+        // Registered once ready: 'activate' can fire during launch.
+        app.on('activate', () => {
+          if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+        });
       });
       
       app.on('window-all-closed', () => {
@@ -994,13 +973,49 @@ function buildMenu() {
         }
       }
 
+      // Questions for the person during a connect: a private key's passphrase,
+      // or a server's keyboard-interactive prompts (a password, a one-time
+      // code). requestId -> { sessionId, resolve }; each resolves to the
+      // answers, or null when the person cancels or the session goes away.
+      const pendingAuthPrompts = new Map();
+
+      function promptAuth(sender, payload) {
+        return new Promise((resolve) => {
+          const requestId = `${payload.sessionId}-auth-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+          pendingAuthPrompts.set(requestId, { sessionId: payload.sessionId, resolve });
+          sendToPage(sender, 'auth-prompt', { requestId, ...payload });
+        });
+      }
+
+      function cancelAuthPrompts(sessionId, sender) {
+        for (const [requestId, pending] of pendingAuthPrompts) {
+          if (pending.sessionId !== sessionId) continue;
+          pendingAuthPrompts.delete(requestId);
+          pending.resolve(null);
+          sendToPage(sender, 'auth-prompt-cancel', { requestId });
+        }
+      }
+
+      // Every question still waiting on a session that is going away
+      function cancelPrompts(sessionId, sender) {
+        cancelHostKeyPrompts(sessionId, sender);
+        cancelAuthPrompts(sessionId, sender);
+      }
+
+      ipcMain.on('auth-response', (event, { requestId, answers }) => {
+        const pending = pendingAuthPrompts.get(requestId);
+        if (!pending) return;
+        pendingAuthPrompts.delete(requestId);
+        pending.resolve(Array.isArray(answers) ? answers.map((answer) => String(answer)) : null);
+      });
+
       // End every SSH connection. Used when the page that owns them is going
       // away; the entry is removed first so each connection's close handler
       // sees it is no longer current and stays quiet.
       function disconnectAllSessions() {
         Object.keys(sessions).forEach((sessionId) => {
           const session = sessions[sessionId];
-          cancelHostKeyPrompts(sessionId, null);
+          cancelPrompts(sessionId, null);
           delete sessions[sessionId];
           try {
             session.conn.end();
@@ -1018,7 +1033,7 @@ function buildMenu() {
       });
 
       ipcMain.on('ssh-disconnect', (event, sessionId) => {
-        cancelHostKeyPrompts(sessionId, event.sender);
+        cancelPrompts(sessionId, event.sender);
         const session = sessions[sessionId];
         if (session && session.conn) {
           try {
@@ -1035,11 +1050,57 @@ function buildMenu() {
       // timer runs instead, paused while a prompt is open.
       const HANDSHAKE_TIMEOUT_MS = 20000;
 
+      // Wrong passphrases asked about again before giving up
+      const MAX_PASSPHRASE_ATTEMPTS = 3;
+      // ssh2's parse errors for a locked key: "...no passphrase given" when
+      // none was supplied, "...bad passphrase?" / "...decrypt..." when wrong
+      const LOCKED_KEY_ERROR = /passphrase|decrypt/i;
+
+      function parsePrivateKey(buffer, passphrase) {
+        const parsed = sshUtils.parseKey(buffer, passphrase);
+        return Array.isArray(parsed) ? parsed[0] : parsed;
+      }
+
+      // Read a private key, asking for its passphrase when it is encrypted and
+      // none was given, or the one given was wrong. Resolves to
+      // { privateKey, passphrase }, or null if the person cancels. Saved hosts
+      // have no passphrase field, so without this an encrypted key could only
+      // be used from Quick Connect. The passphrase is never written to disk.
+      async function loadPrivateKey(sender, sessionId, config) {
+        const keyPath = config.privateKeyPath;
+        const original = fs.readFileSync(keyPath);
+        let passphrase = config.passphrase || undefined;
+
+        for (let attempt = 0; ; attempt++) {
+          let privateKey = original;
+          let parsed = parsePrivateKey(privateKey, passphrase);
+          if (parsed instanceof Error && looksLikePuttyKey(original)) {
+            privateKey = convertPuttyKey(keyPath, passphrase);
+            parsed = parsePrivateKey(privateKey, passphrase);
+          }
+          if (!(parsed instanceof Error)) return { privateKey, passphrase };
+
+          if (!LOCKED_KEY_ERROR.test(parsed.message) || attempt >= MAX_PASSPHRASE_ATTEMPTS) {
+            throw new Error(`Cannot use private key (${keyPath}): ${parsed.message || 'Unsupported key format'}`);
+          }
+          const answers = await promptAuth(sender, {
+            sessionId,
+            kind: 'passphrase',
+            title: 'Unlock private key',
+            instructions: `${path.basename(keyPath)} is protected by a passphrase.`,
+            prompts: [{ prompt: 'Passphrase', echo: false }],
+            error: passphrase ? 'That passphrase did not unlock the key. Try again.' : ''
+          });
+          if (!answers) return null;
+          passphrase = answers[0];
+        }
+      }
+
       // hostId is the saved host the connection came from, if any; it only
       // labels the entry in the recent list.
       ipcMain.on('ssh-connect', (event, { sessionId, config, size, hostId: savedHostId }) => {
         if (sessions[sessionId]) {
-          cancelHostKeyPrompts(sessionId, event.sender);
+          cancelPrompts(sessionId, event.sender);
           sessions[sessionId].conn.end();
           delete sessions[sessionId];
         }
@@ -1188,7 +1249,7 @@ function buildMenu() {
         conn.on('error', (err) => {
           clearHandshakeTimer();
           if (!isCurrent()) return;
-          cancelHostKeyPrompts(sessionId, event.sender);
+          cancelPrompts(sessionId, event.sender);
           const message = hostKeyRejected
             ? 'Connection cancelled: the host key was not accepted.'
             : err.message;
@@ -1199,7 +1260,7 @@ function buildMenu() {
         conn.on('end', () => {
           clearHandshakeTimer();
           if (!isCurrent()) return;
-          cancelHostKeyPrompts(sessionId, event.sender);
+          cancelPrompts(sessionId, event.sender);
           sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Disconnected' });
           delete sessions[sessionId];
         });
@@ -1208,62 +1269,85 @@ function buildMenu() {
           clearHandshakeTimer();
           if (!isCurrent()) return;
           // e.g. the server's LoginGraceTime expired while the prompt was open
-          cancelHostKeyPrompts(sessionId, event.sender);
+          cancelPrompts(sessionId, event.sender);
           sendToPage(event.sender, 'ssh-status', { sessionId, status: 'Closed', hadError });
           delete sessions[sessionId];
         });
         
-        try {
-          const keepaliveSeconds = normalizeKeepalive(config.keepalive);
-          const connConfig = {
-            host: config.host,
-            port: parseInt(config.port),
-            username: config.username,
-            // ssh2 treats 0 as "no keepalives"
-            keepaliveInterval: keepaliveSeconds * 1000,
-            keepaliveCountMax: 3, // Missed replies tolerated before disconnecting
-            hostVerifier,
-            readyTimeout: 0 // replaced by the pausable handshake timer above
-          };
-          
+        // Keyboard-interactive login. A server asking only for the password
+        // gets the saved one, once, as the 'password' method would have.
+        // Anything else (a one-time code, a second factor, the password again
+        // after the saved one was refused) is put to the person.
+        let savedPasswordOffered = false;
+        conn.on('keyboard-interactive', (name, instructions, lang, prompts, finish) => {
+          if (!isCurrent() || prompts.length === 0) {
+            finish([]);
+            return;
+          }
+          const asksOnlyForPassword = prompts.every((p) => !p.echo && /password/i.test(p.prompt || ''));
+          if (asksOnlyForPassword && config.password && !savedPasswordOffered) {
+            savedPasswordOffered = true;
+            finish(prompts.map(() => config.password));
+            return;
+          }
+          clearHandshakeTimer(); // a person is answering now
+          promptAuth(event.sender, {
+            sessionId,
+            kind: 'keyboard-interactive',
+            title: name || 'The server needs more information',
+            instructions: instructions || '',
+            prompts: prompts.map((p) => ({ prompt: String(p.prompt || ''), echo: Boolean(p.echo) }))
+          }).then((answers) => {
+            if (!isCurrent()) return;
+            if (!answers) {
+              sendToPage(event.sender, 'ssh-error', { sessionId, message: 'Connection cancelled: the server\'s question was not answered.' });
+              delete sessions[sessionId];
+              conn.end();
+              return;
+            }
+            armHandshakeTimer();
+            finish(answers);
+          });
+        });
+
+        const keepaliveSeconds = normalizeKeepalive(config.keepalive);
+        const connConfig = {
+          host: config.host,
+          port: parseInt(config.port, 10),
+          username: config.username,
+          // ssh2 treats 0 as "no keepalives"
+          keepaliveInterval: keepaliveSeconds * 1000,
+          keepaliveCountMax: 3, // Missed replies tolerated before disconnecting
+          hostVerifier,
+          // Servers set up for PAM or a second factor often offer only this
+          tryKeyboard: true,
+          readyTimeout: 0 // replaced by the pausable handshake timer above
+        };
+
+        // Loading the key can mean asking for its passphrase, so the connection
+        // starts once that has been settled
+        (async () => {
           if (config.authType === 'key' && config.privateKeyPath) {
-            let keyBuffer = fs.readFileSync(config.privateKeyPath);
-            const passphrase = config.passphrase || undefined;
-            
-            const parseKey = (buffer) => {
-              let parsed = sshUtils.parseKey(buffer, passphrase);
-              if (Array.isArray(parsed)) parsed = parsed[0];
-              return parsed;
-            };
-            
-            let parsed = parseKey(keyBuffer);
-            
-            if (parsed instanceof Error && looksLikePuttyKey(keyBuffer)) {
-              const convertedBuffer = convertPuttyKey(config.privateKeyPath, passphrase);
-              parsed = parseKey(convertedBuffer);
-              if (!(parsed instanceof Error)) {
-                keyBuffer = convertedBuffer;
-              }
+            const key = await loadPrivateKey(event.sender, sessionId, config);
+            if (!isCurrent()) return; // the tab closed, or reconnected, meanwhile
+            if (!key) {
+              sendToPage(event.sender, 'ssh-error', { sessionId, message: 'Connection cancelled: the key\'s passphrase was not entered.' });
+              delete sessions[sessionId];
+              return;
             }
-            
-            if (parsed instanceof Error) {
-              const details = parsed.message || 'Unsupported key format';
-              throw new Error(`Cannot use private key (${config.privateKeyPath}): ${details}`);
-            }
-            
-            connConfig.privateKey = keyBuffer;
-            if (config.passphrase) connConfig.passphrase = config.passphrase;
+            connConfig.privateKey = key.privateKey;
+            if (key.passphrase) connConfig.passphrase = key.passphrase;
           } else {
             connConfig.password = config.password;
           }
-          
           armHandshakeTimer();
           conn.connect(connConfig);
-        } catch (error) {
+        })().catch((error) => {
           clearHandshakeTimer();
+          if (!isCurrent()) return;
           sendToPage(event.sender, 'ssh-error', { sessionId, message: error.message });
-          if (isCurrent()) delete sessions[sessionId];
-        }
+          delete sessions[sessionId];
+        });
       });
       
       ipcMain.on('term-input', (event, { sessionId, data }) => {

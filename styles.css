@@ -504,6 +504,15 @@ body.resizing { cursor: col-resize; user-select: none; }
   transition: background-color .2s;
 }
 .tab.disconnected .tab-dot { background: var(--danger); }
+/* Still connecting (or waiting on a prompt): amber, pulsing, not yet green */
+.tab.connecting .tab-dot {
+  background: var(--warn);
+  animation: tab-dot-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tab-dot-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .tab.connecting .tab-dot { animation: none; }
+}
 
 .tab .tab-icon {
   flex: none;
@@ -1058,6 +1067,26 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   background: rgba(210, 153, 34, .10);
   color: #f0d9a6;
 }
+
+/* ---------- Questions while connecting (passphrase, keyboard-interactive) */
+
+.auth-prompt-dialog { width: 400px; }
+.auth-prompt-dialog .modal-header p {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+/* Written by the server, and often laid out with line breaks */
+.auth-prompt-instructions {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#auth-prompt-error:empty { display: none; }
 
 /* ---------- Find in terminal ------------------------------------------ */
 

@@ -58,6 +58,13 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - ssh2 re-runs the host verifier on every rekey. `acceptedHostKey` stops "Connect Once" from prompting again mid-session.
 - Keepalive: `normalizeKeepalive()` exists in both `main.js` and `renderer.js`; keep them identical. Default 5s, `0` disables, max 3600. The host dialog and Quick Connect both validate their keep-alive box with `parseKeepaliveInput()` in `renderer.js` (empty means the default; anything else must be a whole number in range).
 
+### Sign-in questions (passphrases, keyboard-interactive)
+- `loadPrivateKey()` asks for a key's passphrase through an `auth-prompt` (`kind: 'passphrase'`) when the key is encrypted and none was given, or the given one is wrong: up to `MAX_PASSPHRASE_ATTEMPTS` (3). It runs before `conn.connect`, so cancelling sends nothing to the server. Saved hosts have no passphrase field; this is how their encrypted keys work at all. The passphrase is never written to disk; the renderer keeps it on the tab's `config` so Reconnect doesn't ask again.
+- `tryKeyboard` is on. In the `keyboard-interactive` handler, a server asking only for a password gets the saved password, once; anything else (a one-time code, a second factor) becomes an `auth-prompt` (`kind: 'keyboard-interactive'`), and the handshake timer pauses while it waits. Cancelling ends the connection with an `ssh-error`.
+- Prompt text, titles and instructions come from the server: the renderer sets them only as text. `echo: false` inputs are password fields.
+- `cancelPrompts()` cancels a session's host key and sign-in prompts together; use it wherever a session goes away.
+- The renderer queues sign-in questions across tabs, like host key prompts. The auth modal sits before the host key modal in the DOM, so a host key prompt stacks above it; Esc cancels (order: close/reload confirmation, host key, sign-in, then the rest).
+
 ### Host keys
 - Trust-on-first-use, keyed per `host:port` and per key type. Statuses are `unknown`, `changed` (red warning) and `new-key-type` (amber, e.g. RSA to Ed25519 after an upgrade).
 - The key type string comes from the server and is used as a property name, so `describeHostKey()` restricts it to `[A-Za-z0-9@.+-]`. The raw key blob never goes to the renderer.
@@ -74,9 +81,14 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - `SHORTCUT_GROUPS` in `renderer.js` is a hand-maintained reference rendered on the Settings > Keyboard Shortcuts page. Update it whenever a binding changes.
 
 ### Closing and reloading
+- macOS keeps the app running after its window closes; the `activate` handler (registered once the app is ready, since `activate` can fire during launch) opens a new window when there is none. `reopen-window.e2e.js` emits the event by hand, so it runs on every platform.
 - The window `close` handler asks while SSH sessions are open, which covers Ctrl+W, the title bar button, Alt+F4 and Quit. Reload and Force Reload are custom menu items that go through `reloadWindow()`, not the built-in roles. `did-start-loading` disconnects any sessions left by the page being replaced (a reload used to leave authenticated shells running).
 - `confirmSessionLoss()` shows an in-app dialog, which must acknowledge within `SESSION_LOSS_ACK_MS` (1.5s); otherwise a native dialog is used. The close path must never depend on the renderer alone, or a hung or crashed page makes the window impossible to close.
 - In the renderer, `askSessionLoss()` shows one question at a time; a new question replaces the old one, which resolves as Cancel. Closing a tab (`requestCloseSession`) asks only when `session.connected` is true.
+
+### Connection dots
+- A tab's dot is amber and pulsing while connecting (`.connecting`, set in `createSession` and by Reconnect through `setTabConnecting()`), green once the shell opens, red once the session drops (`.disconnected`). `setTabConnected()` clears `.connecting` and refreshes the tree.
+- A saved host's dot in the tree is green only while one of its tabs is live (`session.connected`), not merely open.
 
 ### Recent connections and Quick Connect
 - `main.js` records a connection on ssh2's `ready` (`recordRecentConnection()`), so failed attempts never appear, and keeps the newest 10. Entries are built from a fixed set of fields, so a password, passphrase or key path can't reach the file. The keep-alive is among them, so reopening a one-off session restores it; entries written before that have none, and fall back to the default.
@@ -108,7 +120,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ## Verifying changes
 
-- **`test/main/`** (`npm test`): `test/helpers/main-harness.js` stubs `electron` through `Module._load`, loads a fresh `main.js` against a temporary `userData`, and calls the captured `ipcMain` handlers directly. `test/helpers/ssh-server.js` wraps ssh2's `Server` as a local SSH endpoint with a host key the test controls, and records pty sizes and window changes.
+- **`test/main/`** (`npm test`): `test/helpers/main-harness.js` stubs `electron` through `Module._load`, loads a fresh `main.js` against a temporary `userData`, and calls the captured `ipcMain` handlers directly. `test/helpers/ssh-server.js` wraps ssh2's `Server` as a local SSH endpoint with a host key the test controls, and records pty sizes, window changes and connections accepted. It accepts any login by default; its `authenticate` option makes it a keyboard-interactive, two-factor or key-only server.
 - **`test/e2e/`** (`npm run test:e2e`): `run.js` starts one Electron process per `*.e2e.js` file. `harness.js` repoints `BrowserWindow.prototype.loadFile` at the project, loads `main.js`, drives the page with `webContents.sendInputEvent`, inspects it with `executeJavaScript`, and scripts `dialog.showMessageBox`. Each check prints as soon as it's known, so a hung file shows how far it got.
 - **Checking that a test catches a bug:** set `ELECTROSSH_MAIN` to another build of `main.js` (e.g. one taken from an older commit), saved in the project root so it finds `preload.js`. Both harnesses load it instead of `main.js`.
 
@@ -120,7 +132,11 @@ Limits of synthetic input in the e2e tests:
 - With no windows left, the test process's event loop can stall, e.g. after `forcefullyCrashRenderer()` and a window close. The harness keeps a hidden spare window. `app.quit()` closes that spare too, so quitting tests call `keepAlive()` to put it back.
 - A crashed renderer freezes the main process while Windows deals with the crash: timers stop firing for anything from two seconds to past the runner's timeout (18s and 12s have both been measured), so a passing test can look hung. Disabling crash dumps (`disable-breakpad` in the harness) keeps dumps out of the temp directories but does not reliably shorten the freeze. What covers it: `waitFor()` takes a final look after its deadline, and `run.js` re-runs a file that timed out without failing a check.
 
-`host-menu.e2e.js` writes to the real system clipboard, since that is what the feature does. It saves the clipboard before it runs and puts it back afterwards.
+`host-menu.e2e.js` and `paste.e2e.js` use the real system clipboard, since that is what the features do. They save the clipboard before they run and put it back afterwards.
+
+A test server that accepts any login can hide a broken auth path: a host whose key the page doesn't know silently falls back to password auth, and such a server lets it in. Tests of key or keyboard-interactive login use `authenticate` to accept only that method.
+
+Scratch scripts run under Electron (screenshots, one-off probes) need absolute paths to the project's modules, and a `process.on('uncaughtException')` that logs and exits; otherwise an error opens a modal dialog on the desktop. `capturePage()` on a window behind others can return a stale frame, so bring it to the front and call `webContents.invalidate()` before capturing.
 
 **Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
 
@@ -129,7 +145,8 @@ Limits of synthetic input in the e2e tests:
 The original app was built with Gemini. Since then (details in `git log`):
 
 - **UI:** redesigned UI with a collapsible host tree and a resizable sidebar; group rename and delete.
-- **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification.
+- **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification; passphrase prompts for encrypted keys; keyboard-interactive and two-factor login.
+- **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
 - **Settings and safety:** keyboard shortcuts page; confirmation before closing or reloading the app, or closing a connected tab.
 - **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button, with its own keep-alive setting; app version beside the name.

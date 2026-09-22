@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHostKeyPromptCancel: (callback) => ipcRenderer.on('host-key-prompt-cancel', (event, args) => callback(args)),
   respondHostKey: (payload) => ipcRenderer.send('host-key-response', payload),
 
+  // Questions asked while connecting: a key's passphrase, or a server's
+  // keyboard-interactive prompts (a password, a one-time code)
+  onAuthPrompt: (callback) => ipcRenderer.on('auth-prompt', (event, args) => callback(args)),
+  onAuthPromptCancel: (callback) => ipcRenderer.on('auth-prompt-cancel', (event, args) => callback(args)),
+  respondAuthPrompt: (payload) => ipcRenderer.send('auth-response', payload),
+
   // Settings events
   onOpenSettings: (callback) => ipcRenderer.on('open-settings', (event, page) => callback(page)),
 

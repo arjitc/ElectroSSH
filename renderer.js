@@ -668,6 +668,7 @@ window.onload = function() {
       }
       const size = { cols: session.term.cols, rows: session.term.rows };
       try {
+        setTabConnecting(sessionId);
         window.electronAPI.connectSSH({ sessionId, config: session.config, size, hostId: session.hostId });
         msgSpan.textContent = 'Attempting to reconnect…';
       } catch (err) {
@@ -996,11 +997,12 @@ window.onload = function() {
   // Sidebar host tree
   // -------------------------
 
-  // Hosts that currently have an open session, so the tree can show a live dot
+  // Hosts with a live session, so the tree can show a green dot. A tab that is
+  // still connecting, or has dropped, doesn't count.
   function connectedHostIds() {
     const ids = new Set();
     Object.values(sessions).forEach((s) => {
-      if (s && s.hostId) ids.add(s.hostId);
+      if (s && s.hostId && s.connected) ids.add(s.hostId);
     });
     return ids;
   }
@@ -1703,7 +1705,7 @@ window.onload = function() {
     // Create Tab UI
     const tabsStrip = document.getElementById('tabs-strip');
     const tabEl = document.createElement('div');
-    tabEl.className = 'tab active';
+    tabEl.className = 'tab active connecting';
     tabEl.id = `tab-${sessionId}`;
     tabEl.title = title;
     tabEl.innerHTML = `<span class="tab-dot"></span>`
@@ -2098,11 +2100,28 @@ window.onload = function() {
 
   // Tracks whether a tab's session is live. Only a live one makes closing the
   // tab ask first; a tab that is still connecting, or has dropped, just closes.
+  // The tab's dot and the host's dot in the tree follow it.
   function setTabConnected(sessionId, connected) {
     const s = sessions[sessionId];
     if (!s) return;
     s.connected = connected;
-    if (s.tabEl) s.tabEl.classList.toggle('disconnected', !connected);
+    if (s.tabEl) {
+      s.tabEl.classList.remove('connecting');
+      s.tabEl.classList.toggle('disconnected', !connected);
+    }
+    refreshHostConnectionDots();
+  }
+
+  // A tab (re)connecting: amber dot until the shell opens, or it fails
+  function setTabConnecting(sessionId) {
+    const s = sessions[sessionId];
+    if (!s) return;
+    s.connected = false;
+    if (s.tabEl) {
+      s.tabEl.classList.remove('disconnected');
+      s.tabEl.classList.add('connecting');
+    }
+    refreshHostConnectionDots();
   }
 
   window.electronAPI.onStatus(({ sessionId, status, code, signal, hadError }) => {
@@ -2247,6 +2266,118 @@ window.onload = function() {
       else renderHostKeyPrompt(hostKeyQueue[0]);
     });
   }
+
+  // -------------------------
+  // Questions asked while connecting
+  // -------------------------
+  // A private key's passphrase, or a server's keyboard-interactive prompts
+  // (a password, a one-time code). Queued across tabs like host key prompts;
+  // [0] is the one on screen. The prompt text comes from the server, so it is
+  // only ever set as text.
+  const authModal = document.getElementById('auth-prompt-modal');
+  const authFields = document.getElementById('auth-prompt-fields');
+  const authQueue = [];
+
+  function authTarget(prompt) {
+    const s = sessions[prompt.sessionId];
+    if (!s) return '';
+    const address = sessionAddress(s);
+    return s.config && s.title && s.title !== s.config.host ? `${s.title}  ·  ${address}` : address;
+  }
+
+  function updateAuthQueueNote() {
+    const waiting = authQueue.length - 1;
+    const note = document.getElementById('auth-prompt-queue');
+    note.textContent = waiting > 0 ? `${waiting} more sign-in question${waiting === 1 ? '' : 's'} waiting after this one.` : '';
+    note.classList.toggle('hidden', waiting <= 0);
+  }
+
+  function renderAuthPrompt(prompt) {
+    document.getElementById('auth-prompt-title').textContent = prompt.title || 'Sign in';
+    document.getElementById('auth-prompt-target').textContent = authTarget(prompt);
+    const instructions = document.getElementById('auth-prompt-instructions');
+    instructions.textContent = prompt.instructions || '';
+    instructions.classList.toggle('hidden', !prompt.instructions);
+    document.getElementById('auth-prompt-error').textContent = prompt.error || '';
+    document.getElementById('btn-auth-submit').textContent = prompt.kind === 'passphrase' ? 'Unlock' : 'Continue';
+
+    authFields.innerHTML = '';
+    prompt.prompts.forEach((p, i) => {
+      const group = document.createElement('div');
+      group.className = 'form-group';
+      const label = document.createElement('label');
+      label.htmlFor = `auth-prompt-input-${i}`;
+      label.textContent = (p.prompt || '').replace(/:\s*$/, '') || 'Response';
+      const input = document.createElement('input');
+      // echo is the server's own "show what's typed" flag: off for secrets
+      input.type = p.echo ? 'text' : 'password';
+      input.id = `auth-prompt-input-${i}`;
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      group.append(label, input);
+      authFields.appendChild(group);
+    });
+    updateAuthQueueNote();
+  }
+
+  function showNextAuthPrompt() {
+    const prompt = authQueue[0];
+    if (!prompt) {
+      authModal.classList.add('hidden');
+      return;
+    }
+    renderAuthPrompt(prompt);
+    // Bring the asking tab forward so it's obvious which connection this is
+    if (sessions[prompt.sessionId] && activeSessionId !== prompt.sessionId) switchTab(prompt.sessionId);
+    authModal.classList.remove('hidden');
+    setTimeout(() => {
+      const first = authFields.querySelector('input');
+      if (first) first.focus();
+    }, 0);
+  }
+
+  // submit: true sends what was typed; false cancels the connection
+  function answerAuthPrompt(submit) {
+    const prompt = authQueue.shift();
+    if (!prompt) return;
+    const inputs = [...authFields.querySelectorAll('input')];
+    const answers = submit ? inputs.map((input) => input.value) : null;
+    inputs.forEach((input) => { input.value = ''; }); // don't leave secrets in the form
+    window.electronAPI.respondAuthPrompt({ requestId: prompt.requestId, answers });
+    // Kept with the tab, as a Quick Connect password is, so Reconnect
+    // doesn't ask again. Never written to disk.
+    const s = sessions[prompt.sessionId];
+    if (s && s.config && submit && prompt.kind === 'passphrase') s.config.passphrase = answers[0];
+    showNextAuthPrompt();
+  }
+
+  if (typeof window.electronAPI.onAuthPrompt === 'function') {
+    window.electronAPI.onAuthPrompt((prompt) => {
+      authQueue.push(prompt);
+      const s = sessions[prompt.sessionId];
+      if (s) s.term.write(prompt.kind === 'passphrase' ? 'Waiting for the key\'s passphrase...\r\n' : 'Waiting for you to answer the server...\r\n');
+      if (authQueue.length === 1) showNextAuthPrompt();
+      else updateAuthQueueNote(); // keep whatever is being typed in the one on screen
+    });
+
+    // The tab closed or the connection went away while the question waited
+    window.electronAPI.onAuthPromptCancel(({ requestId }) => {
+      const index = authQueue.findIndex((p) => p.requestId === requestId);
+      if (index === -1) return;
+      authQueue.splice(index, 1);
+      if (index === 0) showNextAuthPrompt();
+      else updateAuthQueueNote();
+    });
+  }
+
+  document.getElementById('btn-auth-submit').addEventListener('click', () => answerAuthPrompt(true));
+  document.getElementById('btn-auth-cancel').addEventListener('click', () => answerAuthPrompt(false));
+  // Enter in a field answers; a focused button keeps its own Enter
+  authModal.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    e.preventDefault();
+    answerAuthPrompt(true);
+  });
 
   // -------------------------
   // "Disconnect?" confirmation
@@ -2807,6 +2938,8 @@ window.onload = function() {
     if (!sessionLossModal.classList.contains('hidden')) settleSessionLoss(false);
     // A host key prompt sits above everything else; Esc means "don't trust it"
     else if (!hostKeyModal.classList.contains('hidden')) answerHostKeyPrompt('reject');
+    // A sign-in question: Esc cancels that connection
+    else if (!authModal.classList.contains('hidden')) answerAuthPrompt(false);
     else if (!modal.classList.contains('hidden')) modal.classList.add('hidden');
     else if (!groupModal.classList.contains('hidden')) closeGroupModal();
     else if (!quickConnectModal.classList.contains('hidden')) closeQuickConnect();

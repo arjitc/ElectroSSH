@@ -97,5 +97,13 @@ run(async () => {
   await t.sleep(400);
   check('Ctrl+click on a file: hyperlink opens nothing', opened.length === 1, opened);
 
+  // The Help menu points at the project, not at Electron's own documentation
+  const openedBefore = opened.length;
+  ['ElectroSSH on GitHub', 'Release Notes', 'Report a Problem'].forEach((label) => t.menuItem('Help', label).click());
+  await t.sleep(300);
+  const helpPages = opened.slice(openedBefore);
+  check('the Help menu opens ElectroSSH\'s own pages',
+    helpPages.length === 3 && helpPages.every((url) => url.startsWith('https://github.com/arjitc/ElectroSSH')), helpPages);
+
   await server.close();
 });

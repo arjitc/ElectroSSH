@@ -24,9 +24,13 @@ function fingerprintOf(privateKey) {
  * @param {string}   [opts.hostKey]  private host key (a fresh Ed25519 key by default)
  * @param {number}   [opts.port]     0 picks a free port; pass a port to reuse one
  * @param {Function} [opts.onShell]  called with { client, stream } when a shell opens
+ * @param {Function} [opts.authenticate]  handles each ssh2 authentication ctx;
+ *   accepts every method by default. Pass one to act like a keyboard-interactive
+ *   or two-factor server.
  */
-function startSshServer({ hostKey = generateHostKey(), port = 0, onShell } = {}) {
+function startSshServer({ hostKey = generateHostKey(), port = 0, onShell, authenticate = (ctx) => ctx.accept() } = {}) {
   const state = {
+    connectionsAccepted: 0,
     openConnections: 0,
     shellsOpened: 0,
     ptySizes: [],        // size requested when each pty was opened
@@ -37,13 +41,14 @@ function startSshServer({ hostKey = generateHostKey(), port = 0, onShell } = {})
 
   const server = new Server({ hostKeys: [hostKey] }, (client) => {
     clients.add(client);
+    state.connectionsAccepted++;
     state.openConnections++;
     client.on('close', () => {
       state.openConnections--;
       clients.delete(client);
     });
     client.on('error', () => {});
-    client.on('authentication', (ctx) => ctx.accept());
+    client.on('authentication', (ctx) => authenticate(ctx));
     client.on('ready', () => {
       client.on('session', (accept) => {
         const session = accept();
