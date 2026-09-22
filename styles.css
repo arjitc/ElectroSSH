@@ -1097,6 +1097,8 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
   overflow-wrap: anywhere;
 }
 #auth-prompt-error:empty { display: none; }
+#generate-key-error { margin: 10px 0 0; }
+#generate-key-error:empty { display: none; }
 
 /* ---------- Find in terminal ------------------------------------------ */
 
@@ -1366,6 +1368,10 @@ kbd.mouse { border-style: dashed; border-bottom-width: 1px; color: var(--text-di
 /* ---------- Close / reload confirmation ------------------------------- */
 
 .session-loss-dialog { width: 420px; }
+/* A question with no sessions at stake (deleting a host, a group, a key) has
+   nothing to list: drop the empty body and the doubled rule it left */
+.session-loss-dialog:has(.session-loss-list.hidden) .modal-body { display: none; }
+.session-loss-dialog:has(.session-loss-list.hidden) .modal-header { border-bottom: none; }
 
 .session-loss-header {
   display: flex;

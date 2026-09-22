@@ -372,9 +372,14 @@ window.onload = function() {
       deleteBtn.className = 'btn btn-danger';
       deleteBtn.title = 'Remove from the app (file on disk stays untouched).';
       deleteBtn.onclick = async () => {
-        const confirmed = window.confirm(
-          `Remove ${key.name} from ElectroSSH? This will not delete the file on disk.`
-        );
+        // Hosts set to this key can't sign in with it once it's gone
+        const users = allHosts.filter((h) => h.keyId === key.id).length;
+        const confirmed = await askConfirm({
+          title: 'Remove this key?',
+          lead: `"${key.name}" will be removed from ElectroSSH. The key file on disk isn't touched.`
+            + (users ? ` ${users} saved host${users === 1 ? ' uses' : 's use'} it and won't be able to sign in with it until you choose another key.` : ''),
+          confirmLabel: 'Remove Key'
+        });
         if (!confirmed) return;
         await window.electronAPI.deleteSSHKey(key.id);
         await loadSSHKeys();
@@ -923,7 +928,12 @@ window.onload = function() {
     const group = groups.find(g => g.id === groupId);
     const label = group ? group.name : 'this group';
 
-    if (!window.confirm(`Delete the group "${label}"? This cannot be undone.`)) return;
+    const confirmed = await askConfirm({
+      title: 'Delete this group?',
+      lead: `The group "${label}" will be deleted. It has no hosts, so none are affected.`,
+      confirmLabel: 'Delete Group'
+    });
+    if (!confirmed) return;
 
     const result = await window.electronAPI.deleteGroup(groupId);
     if (!result || !result.ok) {
@@ -1520,7 +1530,11 @@ window.onload = function() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete "${hostName}"? This cannot be undone.`);
+    const confirmed = await askConfirm({
+      title: 'Delete this host?',
+      lead: `"${hostName}" will be removed from your saved hosts. This can't be undone.`,
+      confirmLabel: 'Delete Host'
+    });
     if (!confirmed) return;
 
     try {
@@ -2384,13 +2398,15 @@ window.onload = function() {
   });
 
   // -------------------------
-  // "Disconnect?" confirmation
+  // "Are you sure?" confirmation
   // -------------------------
-  // One dialog, two callers: main.js asks before closing or reloading the app
-  // while sessions are open, and a tab's close button asks before dropping a
-  // live session. Only one question is on screen at a time; if another
-  // arrives (Ctrl+W while the tab dialog is up), it replaces the first, which
-  // counts as Cancel.
+  // One in-app dialog for every question asked before something is lost:
+  // main.js asks before closing or reloading the app while sessions are open,
+  // a tab's close button before dropping a live session, and deleting a host
+  // or group or removing a key asks too. (Never window.confirm or alert: a
+  // native dialog doesn't look like the app.) Only one question is on screen
+  // at a time; if another arrives (Ctrl+W while the tab dialog is up), it
+  // replaces the first, which counts as Cancel.
   const sessionLossModal = document.getElementById('session-loss-modal');
   const SESSION_LOSS_LIST_LIMIT = 6;
   let sessionLossPending = null;   // { resolve } for the question on screen
@@ -2437,8 +2453,9 @@ window.onload = function() {
   }
 
   // Resolves true for the confirm button, false for Cancel, Esc, a click
-  // outside, or being replaced by another question.
-  function askSessionLoss({ title, lead, confirmLabel, sessionIds }) {
+  // outside, or being replaced by another question. sessionIds lists the
+  // sessions at stake, if any.
+  function askConfirm({ title, lead, confirmLabel, sessionIds = [] }) {
     return new Promise((resolve) => {
       if (sessionLossPending) sessionLossPending.resolve(false);
       else sessionLossReturnFocus = document.activeElement;
@@ -2478,7 +2495,7 @@ window.onload = function() {
       const reload = action === 'reload';
       const count = sessionIds.length;
       const sessionsText = `${count} open SSH session${count === 1 ? '' : 's'}`;
-      askSessionLoss({
+      askConfirm({
         title: reload ? 'Reload ElectroSSH?' : 'Close ElectroSSH?',
         lead: reload
           ? `Reloading will disconnect ${sessionsText} and close ${count === 1 ? 'its tab' : 'their tabs'}.`
@@ -2505,7 +2522,7 @@ window.onload = function() {
       closeSession(sessionId); // nothing live to lose
       return;
     }
-    const confirmed = await askSessionLoss({
+    const confirmed = await askConfirm({
       title: 'Close this tab?',
       lead: 'Its SSH session is still connected. Closing the tab will disconnect it.',
       confirmLabel: 'Close and Disconnect',
@@ -2866,6 +2883,8 @@ window.onload = function() {
     const directoryInput = document.getElementById('new-key-directory');
     const directory = (directoryInput.value || '').trim() || defaultSSHDir;
     const passphrase = document.getElementById('new-key-passphrase').value;
+    const errorEl = document.getElementById('generate-key-error');
+    errorEl.textContent = '';
     try {
       await window.electronAPI.generateSSHKey({ name, passphrase, type, size, directory });
       document.getElementById('new-key-name').value = '';
@@ -2876,7 +2895,11 @@ window.onload = function() {
       loadHosts(document.getElementById('search-input').value);
     } catch (err) {
       console.error('Key generation failed', err);
-      alert(`Key generation failed: ${err.message || err}`);
+      // Shown under the button, like the host dialog's errors. Electron puts
+      // "Error invoking remote method '...': Error: " before errors from main.
+      const message = String((err && err.message) || err)
+        .replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+      errorEl.textContent = `Key generation failed: ${message}`;
     }
   });
 
