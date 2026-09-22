@@ -39,6 +39,8 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 **Window chrome.** `windowChromeMode()` uses `titleBarOverlay` on Windows, `hiddenInset` on macOS, and the native frame on Linux. The renderer fetches the mode over `window-chrome` and sets `body.frameless` plus `overlay-right`/`overlay-left`, which the CSS uses for drag regions and control spacing.
 
+**The menu on Windows.** With the hidden title bar, Electron shows no menu bar on Windows at all: Alt does nothing and `setMenuBarVisibility(true)` doesn't show it either. Menu items are reachable there only through their accelerators (Ctrl+R, Ctrl+, …). Anything people need must also exist in the page. Settings > About carries the Help menu's links, from `app-info` (version, `REPO_URL`, runtime versions and the OS), plus a "Copy details" block for bug reports. The sidebar's version label opens it, as does Help > About ElectroSSH on macOS and Linux.
+
 ## Constraints that are easy to break
 
 ### xterm
@@ -78,7 +80,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - Plain Ctrl+C/V/F belong to the remote shell; the app uses Ctrl+Shift+C/V/F (Cmd on macOS).
 - Zoom, find and Quick Connect (Ctrl+Shift+N; Cmd+N on macOS) are handled in a capture-phase `keydown` on `window`, so xterm never sees them; otherwise Ctrl+- would also send `^_`. Find and Quick Connect do nothing while a dialog is open. The key list for Quick Connect is `QUICK_CONNECT_KEYS`, shared by the shortcuts page and the buttons' tooltips.
 - Menu accelerators fire only when xterm doesn't consume the key. With the terminal focused, Ctrl+W and Ctrl+R reach the shell; with focus elsewhere they hit the menu.
-- `SHORTCUT_GROUPS` in `renderer.js` is a hand-maintained reference rendered on the Settings > Keyboard Shortcuts page. Update it whenever a binding changes.
+- `SHORTCUT_GROUPS` in `renderer.js` is a hand-maintained reference rendered on the Settings > Keyboard Shortcuts page. Update it whenever a binding changes. "Show the menu bar (Alt)" is listed only on Linux (`IS_LINUX`), the one platform where it works.
 
 ### Closing and reloading
 - macOS keeps the app running after its window closes; the `activate` handler (registered once the app is ready, since `activate` can fire during launch) opens a new window when there is none. `reopen-window.e2e.js` emits the event by hand, so it runs on every platform.
@@ -108,7 +110,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 ### Icons
 - All icons are inline SVG with [Lucide](https://lucide.dev) shapes on Lucide's `0 0 24 24` grid, `fill="none"`, `stroke="currentColor"`, round caps and joins. No icon library or font is loaded.
-- Stroke width follows the display size so every icon reads at the same weight: 12 → 2.9, 14 → 2.5, 16 → 2.2, 18 → 1.9. `ICON_STROKE` and the `icon()` helper in `renderer.js` apply this; `index.html` spells it out per SVG.
+- Stroke width follows the display size so every icon reads at the same weight: 12 → 2.9, 14 → 2.5, 16 → 2.2, 18 → 1.9, 32 → 1.1 (the About page's logo). `ICON_STROKE` and the `icon()` helper in `renderer.js` apply this; `index.html` spells it out per SVG.
 - The sidebar's collapse-all toggle uses `list-collapse`/`list-tree` rather than Lucide's `chevrons-down-up`, whose converging chevrons read as an X at 16px. `updateToggleAllButton()` swaps it with the state.
 - A few icons exist in both `index.html` and the `ICONS` map (the bolt, the ×, the plus): keep them in step.
 
@@ -116,7 +118,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 - Working-tree files use CRLF (git autocrlf). Scripted string replacements must match `\r\n`.
 - `main.js` indents its IPC section as though it were nested, but it is module-level; functions declared there are callable from `createWindow`.
-- The version beside the app name in the sidebar comes from `package.json` (the `app-version` IPC channel), so a release only needs the bump there. `main.js` reads `package.json` itself because `app.getVersion()` reports Electron's version under the e2e harness.
+- The version beside the app name in the sidebar comes from `package.json` (the `app-version` IPC channel), so a release only needs the bump there. It is a button that opens Settings > About. `main.js` reads `package.json` itself because `app.getVersion()` reports Electron's version under the e2e harness.
 
 ## Verifying changes
 

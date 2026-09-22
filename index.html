@@ -26,7 +26,7 @@
             <rect x="3" y="3" width="18" height="18" rx="2"></rect>
           </svg>
           <span>ElectroSSH</span>
-          <span id="app-version" class="brand-version hidden"></span>
+          <button id="app-version" class="brand-version hidden" title="About ElectroSSH"></button>
         </div>
         <div class="sidebar-top-actions">
           <button id="add-host-btn" class="btn-icon" title="Add host" aria-label="Add host">
@@ -195,7 +195,65 @@
               </svg>
               Keyboard Shortcuts
             </button>
+            <button class="settings-nav-item" role="tab" data-page="about" id="settings-nav-about"
+                    aria-controls="settings-page-about">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 16v-4"></path>
+                <path d="M12 8h.01"></path>
+              </svg>
+              About
+            </button>
           </nav>
+
+          <div id="settings-page-about" class="settings-page" role="tabpanel" aria-labelledby="settings-nav-about">
+            <div class="settings-section about-header">
+              <svg class="about-logo" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m7 11 2-2-2-2"></path>
+                <path d="M11 13h4"></path>
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              </svg>
+              <div>
+                <h4>ElectroSSH</h4>
+                <p id="about-version"></p>
+                <p class="about-tagline">An SSH client with tabs, saved hosts and SSH key support.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h4>Links</h4>
+              <div class="about-links">
+                <!-- Addresses come from main (app-info), so they live in one place -->
+                <button class="about-link" data-link="repo">
+                  <span class="about-link-label">ElectroSSH on GitHub</span>
+                  <span class="about-link-hint"></span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                </button>
+                <button class="about-link" data-link="releases">
+                  <span class="about-link-label">Release Notes</span>
+                  <span class="about-link-hint"></span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                </button>
+                <button class="about-link" data-link="issues">
+                  <span class="about-link-label">Report a Problem</span>
+                  <span class="about-link-hint"></span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                </button>
+                <button class="about-link" data-page="shortcuts">
+                  <span class="about-link-label">Keyboard Shortcuts</span>
+                  <span class="about-link-hint">Every key and mouse action</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h4>Details</h4>
+              <p>Include these when you report a problem.</p>
+              <pre id="about-details" class="about-details"></pre>
+              <button id="btn-copy-about-details" class="btn">Copy details</button>
+            </div>
+          </div>
 
           <div id="settings-page-shortcuts" class="settings-page" role="tabpanel" aria-labelledby="settings-nav-shortcuts">
             <p class="settings-page-intro">Everything you can do from the keyboard and mouse. Keys shown for this computer.</p>

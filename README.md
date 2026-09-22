@@ -61,6 +61,7 @@ What works:
 - [x] Find in terminal: Ctrl+Shift+F (Cmd+F on macOS), with match case and regex options
 - [x] Terminal font size: Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+mouse wheel (remembered between sessions)
 - [x] Keyboard shortcuts reference in Settings (also under the Settings menu)
+- [x] About page in Settings: the version, links to the project, and details to copy into a bug report (click the version beside the app name)
 - [x] Reconnect option when connection disconnects
 - [x] Connection status at a glance: amber while connecting, green when live, red when dropped
 - [x] Closing or reloading the app asks for confirmation while SSH sessions are open

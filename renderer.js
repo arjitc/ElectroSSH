@@ -163,6 +163,7 @@ window.onload = function() {
   }
 
   const IS_MAC = /Mac/i.test(navigator.userAgent);
+  const IS_LINUX = !IS_MAC && /Linux/i.test(navigator.userAgent);
 
   // Right-click paste. term.paste() turns line endings into \r, and when the
   // remote program has switched on bracketed paste (bash, zsh and vim do),
@@ -439,7 +440,7 @@ window.onload = function() {
   // -------------------------
   // Settings pages
   // -------------------------
-  const SETTINGS_PAGES = ['keys', 'shortcuts'];
+  const SETTINGS_PAGES = ['keys', 'shortcuts', 'about'];
 
   function showSettingsPage(page) {
     const target = SETTINGS_PAGES.includes(page) ? page : 'keys';
@@ -532,8 +533,11 @@ window.onload = function() {
       items: [
         { action: 'Quick Connect', combos: [QUICK_CONNECT_KEYS], note: 'Works from inside the terminal too' },
         { action: 'Open Settings', combos: [[MOD, ',']] },
+        // Only Linux keeps the standard window frame. On Windows the title
+        // bar is the app's own and Electron shows no menu bar at all, so Alt
+        // does nothing there; Settings > About has the Help menu's links.
+        ...(IS_LINUX ? [{ action: 'Show the menu bar', combos: [['Alt']] }] : []),
         ...(IS_MAC ? [] : [
-          { action: 'Show the menu bar', combos: [['Alt']] },
           { action: 'Full screen', combos: [['F11']], note: 'While the terminal isn\'t focused; there F11 goes to the shell' }
         ])
       ],
@@ -2953,7 +2957,7 @@ window.onload = function() {
     }).catch(() => { /* fall back to the default framed layout */ });
   }
 
-  // Version beside the app name, from package.json
+  // Version beside the app name, from package.json. Clicking it opens About.
   if (typeof window.electronAPI.getAppVersion === 'function') {
     window.electronAPI.getAppVersion().then((version) => {
       if (!version) return;
@@ -2962,6 +2966,54 @@ window.onload = function() {
       label.classList.remove('hidden');
     }).catch(() => { /* leave the label hidden */ });
   }
+  document.getElementById('app-version').addEventListener('click', () => openSettingsTab('about'));
+
+  // -------------------------
+  // Settings > About
+  // -------------------------
+  // The project's pages and the versions a bug report needs. The Help menu has
+  // the same links, but Windows can't show the menu bar, so this page is where
+  // every platform finds them.
+  const ABOUT_LINK_PATHS = { repo: '', releases: '/releases', issues: '/issues' };
+  let appInfo = null;
+
+  function aboutDetailsText(info) {
+    return [
+      `ElectroSSH ${info.version}`,
+      `Electron ${info.electron} · Chromium ${info.chrome} · Node ${info.node}`,
+      info.os
+    ].join('\n');
+  }
+
+  if (typeof window.electronAPI.getAppInfo === 'function') {
+    window.electronAPI.getAppInfo().then((info) => {
+      appInfo = info;
+      document.getElementById('about-version').textContent = `Version ${info.version}`;
+      document.getElementById('about-details').textContent = aboutDetailsText(info);
+      document.querySelectorAll('.about-link[data-link]').forEach((button) => {
+        const url = info.repoUrl + ABOUT_LINK_PATHS[button.dataset.link];
+        button.title = url;
+        button.querySelector('.about-link-hint').textContent = url.replace(/^https:\/\//, '');
+      });
+    }).catch((err) => console.warn('Could not load app details', err));
+  }
+
+  document.querySelectorAll('.about-link[data-link]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!appInfo) return;
+      window.electronAPI.openExternal(appInfo.repoUrl + ABOUT_LINK_PATHS[button.dataset.link])
+        .catch((err) => console.warn('Could not open link', err));
+    });
+  });
+  document.querySelectorAll('.about-link[data-page]').forEach((button) => {
+    button.addEventListener('click', () => showSettingsPage(button.dataset.page));
+  });
+  document.getElementById('btn-copy-about-details').addEventListener('click', async (e) => {
+    if (!appInfo) return;
+    const { left, bottom } = e.currentTarget.getBoundingClientRect();
+    const copied = await writeClipboardText(aboutDetailsText(appInfo));
+    showCopyToast(copied ? 'Copied the details' : 'Could not copy to the clipboard', left, bottom + 6);
+  });
 
   // initial load
   renderShortcutsPage();

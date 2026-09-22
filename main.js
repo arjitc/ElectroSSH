@@ -520,6 +520,30 @@ ipcMain.handle('window-chrome', () => windowChromeMode());
 const { version: APP_VERSION } = require('./package.json');
 ipcMain.handle('app-version', () => APP_VERSION);
 
+const REPO_URL = 'https://github.com/arjitc/ElectroSSH';
+
+// "Windows 10.0.26220 (x64)". os.type() says "Windows_NT", and on macOS
+// os.release() is the Darwin kernel's version, so Electron's
+// getSystemVersion() gives the one people know (absent under plain Node).
+const OS_NAMES = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
+function describeOs() {
+  const name = OS_NAMES[process.platform] || os.type();
+  const version = typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : os.release();
+  return `${name} ${version} (${process.arch})`;
+}
+
+// Settings > About: what it shows, and what "Copy details" puts in a bug
+// report. The Help menu can't be shown on Windows (the title bar is the app's
+// own), so the page is where every platform finds these.
+ipcMain.handle('app-info', () => ({
+  version: APP_VERSION,
+  repoUrl: REPO_URL,
+  electron: process.versions.electron,
+  chrome: process.versions.chrome,
+  node: process.versions.node,
+  os: describeOs()
+}));
+
 // The home view's recent connections (recorded in 'ssh-connect' on 'ready')
 ipcMain.handle('get-recent-connections', () => listRecentConnections());
 ipcMain.handle('remove-recent-connection', (event, id) => {
@@ -562,9 +586,7 @@ ipcMain.handle('open-external', async (event, rawUrl) => {
   return { ok: true };
 });
 
-const REPO_URL = 'https://github.com/arjitc/ElectroSSH';
-
-// Open a page of the Settings tab ('keys' or 'shortcuts')
+// Open a page of the Settings tab ('keys', 'shortcuts' or 'about')
 function openSettingsPage(page) {
   if (mainWindow && !mainWindow.isDestroyed()) sendToPage(mainWindow.webContents, 'open-settings', page);
 }
@@ -652,7 +674,8 @@ function buildMenu() {
               { label: 'Release Notes', click: () => shell.openExternal(`${REPO_URL}/releases`) },
               { label: 'Report a Problem', click: () => shell.openExternal(`${REPO_URL}/issues`) },
               { type: 'separator' },
-              { label: 'Keyboard Shortcuts', click: () => openSettingsPage('shortcuts') }
+              { label: 'Keyboard Shortcuts', click: () => openSettingsPage('shortcuts') },
+              { label: 'About ElectroSSH', click: () => openSettingsPage('about') }
             ]
           }
         ];

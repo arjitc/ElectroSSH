@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Version from package.json, shown beside the app name
   getAppVersion: () => ipcRenderer.invoke('app-version'),
+  // Settings > About: version, project address, runtime versions
+  getAppInfo: () => ipcRenderer.invoke('app-info'),
 
   // Recent connections, newest first (main records each successful connect)
   getRecentConnections: () => ipcRenderer.invoke('get-recent-connections'),

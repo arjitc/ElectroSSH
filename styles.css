@@ -213,6 +213,16 @@ select {
   font-variant-numeric: tabular-nums;
 }
 .brand-version::before { content: '·'; margin-right: 6px; }
+/* A button, opening Settings > About */
+button.brand-version {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.brand-version:hover { color: var(--text-dim); }
+button.brand-version:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
 .sidebar-top-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 
@@ -1235,6 +1245,60 @@ body.frameless.overlay-left .sidebar-top { padding-left: 82px; }
 .settings-page { display: none; flex-direction: column; gap: 14px; }
 .settings-page.active { display: flex; }
 .settings-page-intro { margin: 0; color: var(--text-faint); font-size: 12px; }
+
+/* ---------- Settings > About ------------------------------------------ */
+
+.about-header { display: flex; align-items: center; gap: 14px; }
+.about-logo { flex: none; color: var(--accent); }
+.about-header h4 { margin: 0; font-size: 15px; }
+.about-header p { margin: 2px 0 0; }
+#about-version { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.about-links { display: flex; flex-direction: column; gap: 2px; margin: 8px -8px 0; }
+.about-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.about-link:hover,
+.about-link:focus-visible { background: var(--bg-hover); outline: none; }
+.about-link-label { flex: none; }
+.about-link-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.about-link svg { flex: none; color: var(--text-faint); }
+
+.about-details {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 
 /* ---------- Keyboard shortcuts reference ------------------------------ */
 
