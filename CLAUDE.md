@@ -14,7 +14,7 @@ npm start            # run the app
 npm run pack         # unpacked build via electron-builder
 npm run dist:win     # Windows installer + zip into dist/
 
-npm test             # main-process tests, ~3s (node --test, no extra dependencies)
+npm test             # main-process tests, a few seconds (node --test, no extra dependencies)
 npm run test:slow    # the handshake-timeout test, ~25s
 npm run test:e2e     # drives the real app in Electron; opens its window briefly per file
 npm run test:all     # all three
@@ -29,7 +29,7 @@ There is no linter or type checker. `node --check main.js renderer.js preload.js
 
 Three layers, with the security boundary between them (`contextIsolation: true`, `nodeIntegration: false`):
 
-- **`main.js`**: the Electron main process. Owns the window and app menu, every SSH connection, the JSON stores, host key verification, and the close/reload guards.
+- **`main.js`**: the Electron main process. Owns the window and app menu, every SSH connection, the JSON stores, host key verification, the sign-in questions (key passphrases, keyboard-interactive), the clipboard, and the close/reload guards.
 - **`preload.js`**: exposes `window.electronAPI` via `contextBridge`. All renderer/main traffic goes through it, so a new IPC channel needs changes in all three files.
 - **`renderer.js`**: the entire UI inside one `window.onload` closure (no modules): host tree, tabs and terminals, dialogs, settings. `index.html` is static markup; `styles.css` holds design tokens in `:root`.
 
@@ -86,8 +86,8 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - macOS keeps the app running after its window closes; the `activate` handler (registered once the app is ready, since `activate` can fire during launch) opens a new window when there is none. `reopen-window.e2e.js` emits the event by hand, so it runs on every platform.
 - The window `close` handler asks while SSH sessions are open, which covers Ctrl+W, the title bar button, Alt+F4 and Quit. Reload and Force Reload are custom menu items that go through `reloadWindow()`, not the built-in roles. `did-start-loading` disconnects any sessions left by the page being replaced (a reload used to leave authenticated shells running).
 - `confirmSessionLoss()` shows an in-app dialog, which must acknowledge within `SESSION_LOSS_ACK_MS` (1.5s); otherwise a native dialog is used. The close path must never depend on the renderer alone, or a hung or crashed page makes the window impossible to close.
-- In the renderer, `askConfirm()` shows one question at a time; a new question replaces the old one, which resolves as Cancel. Closing a tab (`requestCloseSession`) asks only when `session.connected` is true.
-- `askConfirm()` is the one "are you sure?" dialog. It also asks before deleting a host or group or removing a key; with no `sessionIds` the session list and its empty band are hidden. Don't use `window.confirm` or `alert`: a native dialog doesn't match the app. Report a failed action inline (a `.form-error` near its button), as the host dialog and key generation do. `confirm-dialogs.e2e.js` replaces the page's `confirm`/`alert` with recorders to catch any that come back.
+- In the renderer, `askConfirm()` is the one "are you sure?" dialog: for closing or reloading the app, closing a connected tab (`requestCloseSession`, which asks only when `session.connected` is true), and deleting a host or group or removing a key. It shows one question at a time; a new question replaces the old one, which resolves as Cancel. With no `sessionIds` the session list and its empty band are hidden.
+- Don't use `window.confirm` or `alert`: a native dialog doesn't match the app. Report a failed action inline (a `.form-error` near its button), as the host dialog and key generation do. `confirm-dialogs.e2e.js` replaces the page's `confirm`/`alert` with recorders to catch any that come back.
 
 ### Connection dots
 - A tab's dot is amber and pulsing while connecting (`.connecting`, set in `createSession` and by Reconnect through `setTabConnecting()`), green once the shell opens, red once the session drops (`.disconnected`). `setTabConnected()` clears `.connecting` and refreshes the tree.
@@ -113,11 +113,11 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - All icons are inline SVG with [Lucide](https://lucide.dev) shapes on Lucide's `0 0 24 24` grid, `fill="none"`, `stroke="currentColor"`, round caps and joins. No icon library or font is loaded.
 - Stroke width follows the display size so every icon reads at the same weight: 12 → 2.9, 14 → 2.5, 16 → 2.2, 18 → 1.9, 32 → 1.1 (the About page's logo). `ICON_STROKE` and the `icon()` helper in `renderer.js` apply this; `index.html` spells it out per SVG.
 - The sidebar's collapse-all toggle uses `list-collapse`/`list-tree` rather than Lucide's `chevrons-down-up`, whose converging chevrons read as an X at 16px. `updateToggleAllButton()` swaps it with the state.
-- A few icons exist in both `index.html` and the `ICONS` map (the bolt, the ×, the plus): keep them in step.
+- A few icons exist in both `index.html` and the `ICONS` map — the bolt, the ×, the sliders, and the collapse-all toggle's starting icon: keep them in step.
 
 ## Quirks
 
-- Working-tree files use CRLF (git autocrlf). Scripted string replacements must match `\r\n`.
+- Working-tree files use CRLF (`core.autocrlf=true`), but a file a tool has just written stays LF until git next touches it. Scripted string replacements should match `\r?\n`.
 - `main.js` indents its IPC section as though it were nested, but it is module-level; functions declared there are callable from `createWindow`.
 - The version beside the app name in the sidebar comes from `package.json` (the `app-version` IPC channel), so a release only needs the bump there. It is a button that opens Settings > About. `main.js` reads `package.json` itself because `app.getVersion()` reports Electron's version under the e2e harness.
 
@@ -134,8 +134,9 @@ Limits of synthetic input in the e2e tests:
 - `executeJavaScript` on a destroyed webContents never settles. The harness's `js()` refuses up front and times out.
 - With no windows left, the test process's event loop can stall, e.g. after `forcefullyCrashRenderer()` and a window close. The harness keeps a hidden spare window. `app.quit()` closes that spare too, so quitting tests call `keepAlive()` to put it back.
 - A crashed renderer freezes the main process while Windows deals with the crash: timers stop firing for anything from two seconds to past the runner's timeout (18s and 12s have both been measured), so a passing test can look hung. Disabling crash dumps (`disable-breakpad` in the harness) keeps dumps out of the temp directories but does not reliably shorten the freeze. What covers it: `waitFor()` takes a final look after its deadline, and `run.js` re-runs a file that timed out without failing a check.
+- A file that hangs to the runner's timeout may be neither of those: an uncaught exception in main puts up Electron's modal error dialog, which blocks the process. That was the real cause of repeated `quit.e2e.js` timeouts, fixed by `sendToPage()`. Look for the dialog before blaming the platform.
 
-`host-menu.e2e.js` and `paste.e2e.js` use the real system clipboard, since that is what the features do. They save the clipboard before they run and put it back afterwards.
+`host-menu.e2e.js`, `paste.e2e.js` and `about.e2e.js` use the real system clipboard, since that is what the features do. They save the clipboard before they run and put it back afterwards.
 
 A test server that accepts any login can hide a broken auth path: a host whose key the page doesn't know silently falls back to password auth, and such a server lets it in. Tests of key or keyboard-interactive login use `authenticate` to accept only that method.
 
@@ -153,6 +154,7 @@ The original app was built with Gemini. Since then (details in `git log`):
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification; passphrase prompts for encrypted keys; keyboard-interactive and two-factor login.
 - **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
-- **Settings and safety:** keyboard shortcuts page; confirmation before closing or reloading the app, or closing a connected tab.
+- **Settings and safety:** keyboard shortcuts page; About page; confirmation before closing or reloading the app, or closing a connected tab; in-app confirmations in place of native `confirm()`/`alert()`.
+- **Icons:** every icon redrawn from Lucide, at one stroke weight per size.
 - **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button, with its own keep-alive setting; app version beside the name.
 - **Copying:** right-click menu on a saved host for its address, display name or SSH port, copied through Electron's clipboard in main.
