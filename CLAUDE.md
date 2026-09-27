@@ -29,6 +29,7 @@ There is no linter or type checker. `node --check main.js renderer.js preload.js
 
 - **One branch per change**, cut from an up-to-date `main`. Work stays uncommitted on its branch until the owner asks for a PR; they usually ask for it to be merged in the same breath. Commit messages say what changed and why, and end with a `Co-Authored-By:` trailer for the model that wrote the change.
 - **Shipping.** Push the branch, open the PR with `gh pr create --base main` (`gh` is installed and signed in as the repo owner), then fast-forward `main` to the branch (`git merge --ff-only`) and push. History is linear with no merge commits; GitHub marks the PR merged once `main` contains its commits.
+- **Git from the tools.** Run `git push` from the Bash tool: from the PowerShell tool it has failed with "could not read Username". Write commit messages and PR bodies to a file in the scratchpad and pass it with `git commit -F <file>` and `gh pr create --body-file <file>`; a PowerShell here-string given as an argument to `-F -` becomes a pathspec, and the commit fails.
 - **Fetch before merging.** Other sessions merge into `main` too: a background session merged #15 while #16 was open. If `origin/main` has moved, rebase the branch onto it, check the result, update the PR branch with `--force-with-lease`, and only then fast-forward. Never force-push `main`.
 - **Before merging**, run `npm test` and `npm run test:e2e`, plus `npm run test:slow` when the connect path changes. Prove a new test catches its bug by running it against the old code and watching it fail: `ELECTROSSH_MAIN` for `main.js`, or `git show HEAD:renderer.js` swapped in and restored afterwards.
 - **UI changes** are checked in the real app with a screenshot (see the scratch-script notes under Verifying changes), which goes to the owner with the report.
@@ -170,7 +171,7 @@ The original app was built with Gemini. Since then (details in `git log`):
 
 - **UI:** redesigned UI with a collapsible host tree and a resizable sidebar; group rename and delete.
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification; passphrase prompts for encrypted keys; keyboard-interactive and two-factor login.
-- **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu.
+- **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu; spaces trimmed from a host's name, address and username.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
 - **Settings and safety:** keyboard shortcuts page; About page; confirmation before closing or reloading the app, or closing a connected tab; in-app confirmations in place of native `confirm()`/`alert()`.
 - **Icons:** every icon redrawn from Lucide, at one stroke weight per size.
@@ -186,7 +187,8 @@ The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `p
 - #13: the About page;
 - #14: in-app confirmations;
 - #15: the test-key fix;
-- #16: docs.
+- #16 and #17: docs;
+- #18: trimming spaces from a host's name, address and username.
 
 ### Open from the code review
 All confirmed still present on 2026-09-27:
