@@ -25,6 +25,17 @@ node test/e2e/run.js test/e2e/tab-close.e2e.js    # one e2e file
 
 There is no linter or type checker. `node --check main.js renderer.js preload.js` catches syntax errors only: a renamed identifier still referenced elsewhere passes it and throws at runtime (this has happened), so grep for old names after a rename.
 
+## Working in this repo
+
+- **One branch per change**, cut from an up-to-date `main`. Work stays uncommitted on its branch until the owner asks for a PR; they usually ask for it to be merged in the same breath. Commit messages say what changed and why, and end with a `Co-Authored-By:` trailer for the model that wrote the change.
+- **Shipping.** Push the branch, open the PR with `gh pr create --base main` (`gh` is installed and signed in as the repo owner), then fast-forward `main` to the branch (`git merge --ff-only`) and push. History is linear with no merge commits; GitHub marks the PR merged once `main` contains its commits.
+- **Fetch before merging.** Other sessions merge into `main` too: a background session merged #15 while #16 was open. If `origin/main` has moved, rebase the branch onto it, check the result, update the PR branch with `--force-with-lease`, and only then fast-forward. Never force-push `main`.
+- **Before merging**, run `npm test` and `npm run test:e2e`, plus `npm run test:slow` when the connect path changes. Prove a new test catches its bug by running it against the old code and watching it fail: `ELECTROSSH_MAIN` for `main.js`, or `git show HEAD:renderer.js` swapped in and restored afterwards.
+- **UI changes** are checked in the real app with a screenshot (see the scratch-script notes under Verifying changes), which goes to the owner with the report.
+- **Version bumps**: `npm version <x.y.z> --no-git-tag-version`, which keeps `package-lock.json` in step. The owner tags and publishes releases on GitHub.
+- **README screenshots** (`docs/screenshots/`) come from a scratch script (not in the repo) that drives the real app against a throwaway data directory. Only invented hosts appear, on the documentation address ranges 203.0.113.x and 198.51.100.x, with a local test server as the connected session. Never capture the owner's real hosts.
+- Merged branches are deleted, locally and on GitHub, when the owner asks.
+
 ## Architecture
 
 Three layers, with the security boundary between them (`contextIsolation: true`, `nodeIntegration: false`):
@@ -65,6 +76,11 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - `tryKeyboard` is on. In the `keyboard-interactive` handler, a server asking only for a password gets the saved password, once; anything else (a one-time code, a second factor) becomes an `auth-prompt` (`kind: 'keyboard-interactive'`), and the handshake timer pauses while it waits. Cancelling ends the connection with an `ssh-error`.
 - Prompt text, titles and instructions come from the server: the renderer sets them only as text. `echo: false` inputs are password fields.
 - `cancelPrompts()` cancels a session's host key and sign-in prompts together; use it wherever a session goes away.
+- The two usual Ubuntu two-factor setups both work, so far checked only by a throwaway probe, not the suite:
+  - key + code (`AuthenticationMethods publickey,keyboard-interactive`): ssh2 takes the publickey partial success and moves on to keyboard-interactive;
+  - password + code: a PAM stack that asks "Password:" then "Verification code:" in one exchange.
+
+  In both, only the code is put to the person.
 - The renderer queues sign-in questions across tabs, like host key prompts. The auth modal sits before the host key modal in the DOM, so a host key prompt stacks above it; Esc cancels (order: close/reload confirmation, host key, sign-in, then the rest).
 
 ### Host keys
@@ -158,3 +174,51 @@ The original app was built with Gemini. Since then (details in `git log`):
 - **Icons:** every icon redrawn from Lucide, at one stroke weight per size.
 - **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button, with its own keep-alive setting; app version beside the name.
 - **Copying:** right-click menu on a saved host for its address, display name or SSH port, copied through Electron's clipboard in main.
+
+## Status (as of 2026-09-27)
+
+### Releases
+The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `package.json` still says 1.7.0, but `main` has moved on. None of the following is in a release yet, so the next one would be 1.8.0:
+- #11: paste, split UTF-8, the reconnect race, early input;
+- #12: key passphrases, keyboard-interactive and two-factor login, status dots, reopening on macOS, the Help menu;
+- #13: the About page;
+- #14: in-app confirmations;
+- #15: the test-key fix;
+- #16: docs.
+
+### Open from the code review
+All confirmed still present on 2026-09-27:
+- **Installer contents.** It packs `**/*` minus tests, so `docs/screenshots` (1.4 MB), `CLAUDE.md` and `README.md` ship in it. Exclude them in `build.files`.
+- **No Content-Security-Policy** in `index.html`. Every `innerHTML` with outside data is escaped today, so a CSP would be a second layer. It needs `'unsafe-inline'` for styles: xterm injects them, and a few elements use `style=`.
+- **Untrimmed input.** Host and username aren't trimmed, in Quick Connect or the host dialog, so a pasted trailing space fails DNS.
+- **Stale password.** A saved host switched from password to key login keeps its old password in `saved_hosts.json`.
+- **Missing key.** A saved host whose key is gone falls back to password login with an empty password (`buildConfigFromHost`), so it fails as a login error rather than saying the key is missing.
+- **puttygen.** `convertPuttyKey()` passes `-passphrase` to puttygen, which probably isn't an option (puttygen takes `--old-passphrase <file>`). This is unverified; puttygen isn't installed on the dev machine. The converted key is also written unencrypted to the temp directory for a moment. The fallback matters: ssh2 reads only PPK v2 RSA/DSA keys, not modern `.ppk` files.
+- **Stuck close.** If the page acknowledges the close question and then dies, `confirmSessionLoss()` waits forever, because the acknowledgement cancelled the native fallback.
+- **Session ids** are `Date.now()` strings, so two sessions created in the same millisecond would collide.
+- **Leftover comment.** `renderer.js` still opens with Gemini's "Full renderer file — replaces existing renderer.js" comment.
+- **2FA tests.** The combined setups above (key + code, password + code) deserve real tests.
+
+### Discussed and deferred
+The owner wants to come back to these. The design decisions so far:
+- **Encrypting saved passwords.** Use Electron `safeStorage`: DPAPI on Windows, the Keychain on macOS, the keyring on Linux.
+  - Encrypt the existing plaintext passwords on first launch.
+  - Move password lookup into main, so the renderer never holds saved passwords. `get-hosts` sends them today; `ssh-connect` already carries `hostId`.
+  - A password that can't be decrypted (a new machine) is simply asked for again.
+  - Linux without a keyring falls back to a fixed key: detect it, and warn or refuse.
+  - A master password is an optional extra, not part of the basic fix.
+- **Exporting and importing configuration.**
+  - Main decrypts, then encrypts the whole file with a password the person chooses (scrypt, then AES-256-GCM). There is no plaintext export.
+  - Import re-encrypts each password with the new machine's `safeStorage`, and merges by default.
+  - SSH keys go out as references; their contents only on request.
+  - Known hosts come only from an encrypted export, and never silently overwrite a different trusted key.
+- **File transfer.** SFTP, not SCP. ssh2 has a full SFTP client, and `conn.sftp()` reuses the session's own connection, so there's no second login.
+  - Start small: drag a file onto a session to upload, download by path, with progress and cancel.
+  - The test server needs an SFTP subsystem first.
+- **Editing a remote file in a local editor.**
+  - Download to a temp file and open it with a configured editor, spawned with an argv array, never a shell string.
+  - Watch the directory, not the file: editors often save by writing a new file and renaming it over the old.
+  - Debounce, and upload on save, checking first that the remote file hasn't changed.
+  - Keep local edits if the connection drops.
+  - Never hand downloads to the OS default handler: a remote `.bat` would run.
+- **A ⋯ button** in the top bar that pops up the whole application menu on Windows. Offered, not chosen: the About page covered the Help links.
