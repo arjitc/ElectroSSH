@@ -46,6 +46,19 @@ function sendToPage(sender, channel, payload) {
   if (sender && !sender.isDestroyed()) sender.send(channel, payload);
 }
 
+// Spaces around a display name, address or username are never meant; they
+// come from pasting, and "example.com " fails to resolve. Hosts saved before
+// this was trimmed are cleaned as they're read. Passwords are left as typed.
+const TRIMMED_HOST_FIELDS = ['name', 'host', 'username'];
+
+function trimHostFields(host) {
+  const trimmed = { ...host };
+  TRIMMED_HOST_FIELDS.forEach((field) => {
+    if (typeof trimmed[field] === 'string') trimmed[field] = trimmed[field].trim();
+  });
+  return trimmed;
+}
+
 function readHostStore() {
   let store = { hosts: [], groups: [defaultGroup] };
   if (!fs.existsSync(hostsFilePath)) return store;
@@ -65,7 +78,7 @@ function readHostStore() {
   
   // Ensure every host has a group assignment and a keepalive value
   store.hosts = store.hosts.map(h => ({
-    ...h,
+    ...trimHostFields(h),
     groupId: h.groupId || defaultGroup.id,
     keepalive: normalizeKeepalive(h.keepalive)
   }));
@@ -864,7 +877,7 @@ function buildMenu() {
       
       ipcMain.handle('save-host', async (event, hostData) => {
         const store = readHostStore();
-        hostData = { ...hostData, keepalive: normalizeKeepalive(hostData.keepalive) };
+        hostData = { ...trimHostFields(hostData), keepalive: normalizeKeepalive(hostData.keepalive) };
         const targetGroupId = hostData.groupId || defaultGroup.id;
         const hasGroup = store.groups.some(g => g.id === targetGroupId);
         if (!hasGroup) {

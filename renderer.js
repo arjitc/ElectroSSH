@@ -1493,12 +1493,14 @@ window.onload = function() {
       return;
     }
 
+    // Stray spaces, usually pasted, would be saved with the address and fail
+    // to resolve. The password is left exactly as typed.
     const hostData = {
       id: hostId || null,
-      name: document.getElementById('save-name').value,
-      host: document.getElementById('save-host').value,
+      name: document.getElementById('save-name').value.trim(),
+      host: document.getElementById('save-host').value.trim(),
       port: document.getElementById('save-port').value,
-      username: document.getElementById('save-user').value,
+      username: document.getElementById('save-user').value.trim(),
       password: document.getElementById('save-pass').value,
       groupId: document.getElementById('save-group').value,
       authType: document.getElementById('save-auth').value,
@@ -2570,10 +2572,11 @@ window.onload = function() {
     const keepaliveInput = document.getElementById('inp-keepalive');
     const keepalive = parseKeepaliveInput(keepaliveInput);
 
+    // As in the host dialog: trim the address and username, not the password
     const config = {
-      host: hostInput.value,
+      host: hostInput.value.trim(),
       port: portInput.value,
-      username: userInput.value,
+      username: userInput.value.trim(),
       password: passInput.value,
       authType: authMethod,
       keepalive

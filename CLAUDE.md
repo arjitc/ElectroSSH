@@ -48,6 +48,8 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 **Persistence.** In Electron's `userData`: `saved_hosts.json` (`{ hosts, groups }`), `ssh_keys.json`, `recent_connections.json` (`{ entries }`), and `known_hosts.json` (`{ hosts: { "host:port": { <keyType>: { key, fingerprint, addedAt } } } }`). In renderer `localStorage`: `electrossh.collapsedGroups`, `electrossh.sidebarWidth`, `electrossh.fontSize`. Saved passwords are stored in clear text (see README).
 
+**Trimmed fields.** A host's display name, address and username never keep surrounding spaces (a pasted `"example.com "` fails DNS). Both dialogs trim them before validating, so a field of only spaces counts as empty, and `trimHostFields()` in `main.js` trims them again on `save-host` and in `readHostStore()`, which cleans hosts saved before this. Passwords and passphrases are never trimmed.
+
 **Window chrome.** `windowChromeMode()` uses `titleBarOverlay` on Windows, `hiddenInset` on macOS, and the native frame on Linux. The renderer fetches the mode over `window-chrome` and sets `body.frameless` plus `overlay-right`/`overlay-left`, which the CSS uses for drag regions and control spacing.
 
 **The menu on Windows.** With the hidden title bar, Electron shows no menu bar on Windows at all: Alt does nothing and `setMenuBarVisibility(true)` doesn't show it either. Menu items are reachable there only through their accelerators (Ctrl+R, Ctrl+, …). Anything people need must also exist in the page. Settings > About carries the Help menu's links, from `app-info` (version, `REPO_URL`, runtime versions and the OS), plus a "Copy details" block for bug reports. The sidebar's version label opens it, as does Help > About ElectroSSH on macOS and Linux.
@@ -190,7 +192,6 @@ The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `p
 All confirmed still present on 2026-09-27:
 - **Installer contents.** It packs `**/*` minus tests, so `docs/screenshots` (1.4 MB), `CLAUDE.md` and `README.md` ship in it. Exclude them in `build.files`.
 - **No Content-Security-Policy** in `index.html`. Every `innerHTML` with outside data is escaped today, so a CSP would be a second layer. It needs `'unsafe-inline'` for styles: xterm injects them, and a few elements use `style=`.
-- **Untrimmed input.** Host and username aren't trimmed, in Quick Connect or the host dialog, so a pasted trailing space fails DNS.
 - **Stale password.** A saved host switched from password to key login keeps its old password in `saved_hosts.json`.
 - **Missing key.** A saved host whose key is gone falls back to password login with an empty password (`buildConfigFromHost`), so it fails as a login error rather than saying the key is missing.
 - **puttygen.** `convertPuttyKey()` passes `-passphrase` to puttygen, which probably isn't an option (puttygen takes `--old-passphrase <file>`). This is unverified; puttygen isn't installed on the dev machine. The converted key is also written unencrypted to the temp directory for a moment. The fallback matters: ssh2 reads only PPK v2 RSA/DSA keys, not modern `.ppk` files.
