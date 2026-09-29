@@ -37,9 +37,17 @@
       "output": "dist"
     },
     "files": [
-      "**/*",
-      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!**/test/**"
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "LICENSE",
+      "!**/node_modules/**/*.{md,markdown,map,ts,mts,cts}",
+      "!**/node_modules/**/*.{c,cc,cpp,h,hpp,inl,gyp,gypi}",
+      "!**/node_modules/**/build/**/*.{iobj,ipdb,pdb,lib,exp,tlog,lastbuildstate,recipe,vcxproj,filters}",
+      "!**/node_modules/cpu-features/deps/**",
+      "!**/node_modules/{nan,buildcheck}/**"
     ],
     "extraResources": [],
     "win": {

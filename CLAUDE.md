@@ -134,6 +134,10 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - The sidebar's collapse-all toggle uses `list-collapse`/`list-tree` rather than Lucide's `chevrons-down-up`, whose converging chevrons read as an X at 16px. `updateToggleAllButton()` swaps it with the state.
 - A few icons exist in both `index.html` and the `ICONS` map — the bolt, the ×, the sliders, and the collapse-all toggle's starting icon: keep them in step.
 
+### Packaging
+- `build.files` in `package.json` is an allowlist: the six files the app runs (`main.js`, `preload.js`, `renderer.js`, `index.html`, `styles.css`, `LICENSE`). electron-builder adds `package.json` and the production dependencies itself. A new file the app loads must be added there, or it works everywhere except the installed app. `build-files.test.js` reads what `main.js` and `index.html` load and fails if the list misses any of it.
+- The rest of the list drops what `node_modules` doesn't need at run time: source maps, TypeScript, markdown, C sources, `nan` and `buildcheck` (build-time only), `cpu-features/deps`, and the Visual Studio leftovers (`.iobj`, `.ipdb`, `.lib`, `.tlog`, …) in the native modules' `build` folders. The only native files loaded are `sshcrypto.node` and `cpufeatures.node`, with `pagent.exe` for Pageant. This took the packed app files from 16 MB to 2.9 MB.
+
 ## Quirks
 
 - Working-tree files use CRLF (`core.autocrlf=true`), but a file a tool has just written stays LF until git next touches it. Scripted string replacements should match `\r?\n`.
@@ -162,6 +166,8 @@ A test server that accepts any login can hide a broken auth path: a host whose k
 Make test keys, host or client, with `generateKey()` from `test/helpers/ssh-server.js`, never ssh2's `utils.generateKeyPairSync` directly. About one Ed25519 key in 256 from ssh2 is malformed (it strips a leading zero byte from the public key) and ssh2's own parser refuses it; drawn at random in a dozen places, that failed some test in roughly one `npm test` run in twenty. `generateKey()` draws again until the key parses.
 
 Scratch scripts run under Electron (screenshots, one-off probes) need absolute paths to the project's modules, and a `process.on('uncaughtException')` that logs and exits; otherwise an error opens a modal dialog on the desktop. `capturePage()` on a window behind others can return a stale frame, so bring it to the front and call `webContents.invalidate()` before capturing.
+
+**A packed build** (a scratch script, not in the repo): `npx electron-builder --dir -c.directories.output=<scratch>` leaves `dist/` alone. List `resources/app.asar` with `@electron/asar` (`getRawHeader` gives sizes). To drive it, start `ElectroSSH.exe --user-data-dir=<scratch profile> --remote-debugging-port=0`: the profile keeps the owner's hosts out of it, and Chromium writes the port it picked to `DevToolsActivePort` in that folder. Then use the Chrome DevTools Protocol over Node's built-in `WebSocket` (`Runtime.evaluate`, `Page.captureScreenshot`). Packing also rebuilds `cpu-features` in `node_modules` for Electron; the tests still pass after it.
 
 **Renderer only** (no test in the repo): serve the project directory and inject a stub `window.electronAPI` before `renderer.js` loads.
 
@@ -192,7 +198,6 @@ The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `p
 
 ### Open from the code review
 All confirmed still present on 2026-09-27:
-- **Installer contents.** It packs `**/*` minus tests, so `docs/screenshots` (1.4 MB), `CLAUDE.md` and `README.md` ship in it. Exclude them in `build.files`.
 - **No Content-Security-Policy** in `index.html`. Every `innerHTML` with outside data is escaped today, so a CSP would be a second layer. It needs `'unsafe-inline'` for styles: xterm injects them, and a few elements use `style=`.
 - **Stale password.** A saved host switched from password to key login keeps its old password in `saved_hosts.json`.
 - **Missing key.** A saved host whose key is gone falls back to password login with an empty password (`buildConfigFromHost`), so it fails as a login error rather than saying the key is missing.
