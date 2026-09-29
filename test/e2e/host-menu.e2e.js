@@ -18,7 +18,7 @@ run(async () => {
 
 async function testHostMenu() {
   const t = await start();
-  await t.js(`window.electronAPI.saveHost({ name: 'BLR-VPN', host: '142.93.215.8', port: 2222, username: 'root',
+  await t.js(`window.electronAPI.saveHost({ name: 'Web server', host: '203.0.113.10', port: 2200, username: 'root',
       password: 'x', authType: 'password', groupId: 'default', keepalive: 5 })
     .then(() => window.electronAPI.saveHost({ name: 'Build box', host: 'build.internal', port: 22, username: 'ci',
       password: 'x', authType: 'password', groupId: 'default', keepalive: 5 }))
@@ -52,23 +52,23 @@ async function testHostMenu() {
   clipboard.writeText('something else');
 
   // A genuine right-click
-  await rightClick('BLR-VPN');
+  await rightClick('Web server');
   let m = await menu();
   check('right-clicking a host opens its menu', m.shown, m);
   check('offering its IP address, display name and SSH port', JSON.stringify(m.items) === JSON.stringify([
-    ['Copy IP address', '142.93.215.8'], ['Copy display name', 'BLR-VPN'], ['Copy SSH port', '2222']]), m.items);
+    ['Copy IP address', '203.0.113.10'], ['Copy display name', 'Web server'], ['Copy SSH port', '2200']]), m.items);
   check('with the first item focused', m.focused === 'Copy IP address', m);
-  check('and the host selected', await t.js(`${rowExpr('BLR-VPN')}.classList.contains('selected')`));
+  check('and the host selected', await t.js(`${rowExpr('Web server')}.classList.contains('selected')`));
 
   await t.click('#host-context-menu [data-copy="address"]');
-  check('Copy IP address puts the address on the clipboard', await copied('142.93.215.8'), clipboard.readText());
+  check('Copy IP address puts the address on the clipboard', await copied('203.0.113.10'), clipboard.readText());
   const note = await toast();
   check('the menu closes and says what was copied',
-    !(await menu()).shown && note.visible && note.text === 'Copied 142.93.215.8', note);
+    !(await menu()).shown && note.visible && note.text === 'Copied 203.0.113.10', note);
 
-  await rightClick('BLR-VPN');
+  await rightClick('Web server');
   await t.click('#host-context-menu [data-copy="name"]');
-  check('Copy display name copies the name', await copied('BLR-VPN'), clipboard.readText());
+  check('Copy display name copies the name', await copied('Web server'), clipboard.readText());
 
   // From the keyboard: Shift+F10 on the focused host, arrows, Enter, Esc
   await t.focus('.tree-host.selected');
@@ -79,12 +79,12 @@ async function testHostMenu() {
   await t.press('Down');
   check('the arrow keys move through it', (await menu()).focused === 'Copy SSH port');
   await t.press('Return');
-  check('Enter copies the port', await copied('2222'), clipboard.readText());
-  check('and focus goes back to the host', await hostFocused('BLR-VPN'));
+  check('Enter copies the port', await copied('2200'), clipboard.readText());
+  check('and focus goes back to the host', await hostFocused('Web server'));
 
   await t.press('F10', ['shift']);
   await t.press('Escape');
-  check('Esc closes it and focus goes back to the host', !(await menu()).shown && await hostFocused('BLR-VPN'));
+  check('Esc closes it and focus goes back to the host', !(await menu()).shown && await hostFocused('Web server'));
 
   // A DNS name isn't called an IP address
   await rightClick('Build box');

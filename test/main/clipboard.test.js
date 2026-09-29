@@ -12,8 +12,8 @@ const app = loadMain({ clipboard: { writeText: (text) => written.push(text), rea
 after(() => app.cleanup());
 
 test('copies a string', async () => {
-  assert.equal(await app.invoke('clipboard-write', '142.93.215.8'), true);
-  assert.deepEqual(written.slice(-1), ['142.93.215.8']);
+  assert.equal(await app.invoke('clipboard-write', '203.0.113.10'), true);
+  assert.deepEqual(written.slice(-1), ['203.0.113.10']);
 });
 
 test('refuses anything that is not a string', async () => {

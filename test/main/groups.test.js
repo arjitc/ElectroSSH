@@ -19,7 +19,7 @@ beforeEach(() => {
     groups: [
       { id: 'default', name: 'Default' },
       { id: 'g-prod', name: 'Production' },
-      { id: 'g-lax', name: 'LAX' },
+      { id: 'g-qa', name: 'QA' },
       { id: 'g-empty', name: 'Empty Group' }
     ],
     hosts: [
@@ -39,23 +39,23 @@ describe('rename-group', () => {
   });
 
   test('trims whitespace', async () => {
-    const store = await app.invoke('rename-group', { groupId: 'g-lax', name: '  Los Angeles  ' });
-    assert.equal(nameOf(store, 'g-lax'), 'Los Angeles');
+    const store = await app.invoke('rename-group', { groupId: 'g-qa', name: '  Quality Assurance  ' });
+    assert.equal(nameOf(store, 'g-qa'), 'Quality Assurance');
   });
 
   test('refuses a name another group already has, ignoring case', async () => {
-    const store = await app.invoke('rename-group', { groupId: 'g-lax', name: 'production' });
-    assert.equal(nameOf(store, 'g-lax'), 'LAX');
+    const store = await app.invoke('rename-group', { groupId: 'g-qa', name: 'production' });
+    assert.equal(nameOf(store, 'g-qa'), 'QA');
   });
 
   test('allows a group to keep its own name', async () => {
-    const store = await app.invoke('rename-group', { groupId: 'g-lax', name: 'lax' });
-    assert.equal(nameOf(store, 'g-lax'), 'lax');
+    const store = await app.invoke('rename-group', { groupId: 'g-qa', name: 'qa' });
+    assert.equal(nameOf(store, 'g-qa'), 'qa');
   });
 
   test('refuses a blank name', async () => {
-    const store = await app.invoke('rename-group', { groupId: 'g-lax', name: '   ' });
-    assert.equal(nameOf(store, 'g-lax'), 'LAX');
+    const store = await app.invoke('rename-group', { groupId: 'g-qa', name: '   ' });
+    assert.equal(nameOf(store, 'g-qa'), 'QA');
   });
 
   test('ignores an unknown group', async () => {
@@ -79,7 +79,7 @@ describe('delete-group', () => {
     assert.equal(result.ok, true);
     assert.ok(!hasGroup(result.store, 'g-empty'));
     assert.ok(!hasGroup(app.readStore(STORE), 'g-empty'), 'persisted');
-    assert.deepEqual(result.store.groups.map((g) => g.id), ['default', 'g-prod', 'g-lax']);
+    assert.deepEqual(result.store.groups.map((g) => g.id), ['default', 'g-prod', 'g-qa']);
     assert.equal(result.store.hosts.length, 3);
   });
 
