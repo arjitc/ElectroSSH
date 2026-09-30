@@ -1586,7 +1586,8 @@ window.onload = function() {
   // Create Session (term + banner + handlers)
   // -------------------------
   function createSession(config = null, title = "New Connection", hostId = null) {
-    const sessionId = Date.now().toString();
+    // Random, so two sessions opened in the same millisecond can't share one
+    const sessionId = crypto.randomUUID();
 
     // Container & banner
     const termWrapper = document.getElementById('terminals-wrapper');

@@ -48,6 +48,8 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 
 **Sessions.** The renderer creates a `sessionId` and sends `ssh-connect`. `main.js` keeps `sessions[sessionId] = { conn, stream, size, appliedSize }` and streams back `ssh-data`, `ssh-status` and `ssh-error`. The renderer's `sessions[sessionId]` holds the `Terminal`, its addons, the tab element, the connection config, and `connected`.
 
+**Ids.** Sessions, new hosts and new keys get `crypto.randomUUID()`: the Web Crypto one in the renderer, Node's in `main.js`. Timestamps collided when two were made in the same millisecond, which an import would do. Hosts and keys saved before this keep their timestamp ids, so treat every id as an opaque string. Groups use a timestamp plus a random suffix, and sign-in question ids use random bytes.
+
 **Persistence.** In Electron's `userData`: `saved_hosts.json` (`{ hosts, groups }`), `ssh_keys.json`, `recent_connections.json` (`{ entries }`), and `known_hosts.json` (`{ hosts: { "host:port": { <keyType>: { key, fingerprint, addedAt } } } }`). In renderer `localStorage`: `electrossh.collapsedGroups`, `electrossh.sidebarWidth`, `electrossh.fontSize`. Saved passwords are stored in clear text (see README).
 
 **Trimmed fields.** A host's display name, address and username never keep surrounding spaces (a pasted `"example.com "` fails DNS). Both dialogs trim them before validating, so a field of only spaces counts as empty, and `trimHostFields()` in `main.js` trims them again on `save-host` and in `readHostStore()`, which cleans hosts saved before this. Passwords and passphrases are never trimmed.
@@ -178,7 +180,7 @@ The original app was built with Gemini. Since then (details in `git log`):
 
 - **UI:** redesigned UI with a collapsible host tree and a resizable sidebar; group rename and delete.
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification; passphrase prompts for encrypted keys; keyboard-interactive and two-factor login.
-- **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu; spaces trimmed from a host's name, address and username.
+- **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu; spaces trimmed from a host's name, address and username; random ids for sessions, hosts and keys.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
 - **Settings and safety:** keyboard shortcuts page; About page; confirmation before closing or reloading the app, or closing a connected tab; in-app confirmations in place of native `confirm()`/`alert()`.
 - **Icons:** every icon redrawn from Lucide, at one stroke weight per size.
@@ -195,7 +197,11 @@ The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `p
 - #14: in-app confirmations;
 - #15: the test-key fix;
 - #16 and #17: docs;
-- #18: trimming spaces from a host's name, address and username.
+- #18: trimming spaces from a host's name, address and username;
+- #19: docs;
+- #20: an installer holding only what the app runs (16 MB of app files down to 2.9 MB);
+- #21: invented hosts in the tests;
+- #22: random ids for sessions, hosts and keys.
 
 ### Open from the code review
 All confirmed still present on 2026-09-27:
@@ -204,7 +210,6 @@ All confirmed still present on 2026-09-27:
 - **Missing key.** A saved host whose key is gone falls back to password login with an empty password (`buildConfigFromHost`), so it fails as a login error rather than saying the key is missing.
 - **puttygen.** `convertPuttyKey()` passes `-passphrase` to puttygen, which probably isn't an option (puttygen takes `--old-passphrase <file>`). This is unverified; puttygen isn't installed on the dev machine. The converted key is also written unencrypted to the temp directory for a moment. The fallback matters: ssh2 reads only PPK v2 RSA/DSA keys, not modern `.ppk` files.
 - **Stuck close.** If the page acknowledges the close question and then dies, `confirmSessionLoss()` waits forever, because the acknowledgement cancelled the native fallback.
-- **Session ids** are `Date.now()` strings, so two sessions created in the same millisecond would collide.
 - **Leftover comment.** `renderer.js` still opens with Gemini's "Full renderer file — replaces existing renderer.js" comment.
 - **2FA tests.** The combined setups above (key + code, password + code) deserve real tests.
 

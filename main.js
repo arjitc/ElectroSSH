@@ -768,7 +768,7 @@ function buildMenu() {
         
         const store = readKeyStore();
         const already = store.keys.some((k) => k.privateKeyPath === trimmedPath);
-        const keyId = already ? store.keys.find((k) => k.privateKeyPath === trimmedPath).id : Date.now().toString();
+        const keyId = already ? store.keys.find((k) => k.privateKeyPath === trimmedPath).id : crypto.randomUUID();
         
         if (!already) {
           store.keys.push({
@@ -853,7 +853,7 @@ function buildMenu() {
         });
         
         const store = readKeyStore();
-        const id = Date.now().toString();
+        const id = crypto.randomUUID();
         store.keys.push({
           id,
           name: safeName,
@@ -890,8 +890,11 @@ function buildMenu() {
           // Update existing host
           store.hosts[existingHostIndex] = { ...store.hosts[existingHostIndex], ...hostData, groupId: targetGroupId };
         } else {
-          // Add new host (generate ID)
-          const id = Date.now().toString(); // Simple timestamp ID
+          // Add new host. A random id, not a timestamp: hosts saved in the same
+          // millisecond (an import, say) would otherwise share one, and editing
+          // or deleting either would hit both. Older hosts keep their
+          // timestamp ids; nothing reads meaning into an id.
+          const id = crypto.randomUUID();
           store.hosts.push({ ...hostData, id, groupId: targetGroupId });
         }
         
