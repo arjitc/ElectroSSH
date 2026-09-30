@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <!-- A second line of defence behind escaping: scripts only from the app's
+       own files (no inline code, no eval), and nothing fetched from anywhere.
+       Styles may be inline because xterm injects <style> elements. It must
+       come before the stylesheets and scripts it governs. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ElectroSSH</title>
   <link rel="stylesheet" href="./node_modules/@xterm/xterm/css/xterm.css" />

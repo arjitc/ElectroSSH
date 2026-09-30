@@ -41,6 +41,13 @@ async function waitFor(predicate, timeoutMs = 5000) {
 const results = [];
 let finished = false;
 
+// Content-Security-Policy violations in any page, from its first load on. A
+// violation only shows as a console error, so a feature the policy broke
+// would otherwise pass unnoticed; finish() fails the file if there were any.
+// A test that causes some on purpose empties this afterwards.
+const cspViolations = [];
+let watchingCsp = false;
+
 // Each result is printed as soon as it's known, so a test that hangs still
 // shows how far it got.
 function check(name, ok, detail) {
@@ -54,6 +61,7 @@ function check(name, ok, detail) {
 function finish() {
   if (finished) return;
   finished = true;
+  if (watchingCsp) check('no Content-Security-Policy violations', cspViolations.length === 0, cspViolations.slice(0, 3));
   console.log(`1..${results.length}`);
   app.exit(results.length > 0 && results.every((r) => r.ok) ? 0 : 1);
 }
@@ -82,6 +90,16 @@ async function start() {
   // goes to the throwaway directory.
   app.commandLine.appendSwitch('disable-breakpad');
   app.setPath('crashDumps', path.join(userData, 'crashes'));
+
+  // Before main.js loads, so the first page load is covered. Electron 39
+  // passes one event object; older versions passed (event, level, message).
+  watchingCsp = true;
+  app.on('web-contents-created', (event, contents) => {
+    contents.on('console-message', (e, level, legacyMessage) => {
+      const message = typeof e.message === 'string' ? e.message : String(legacyMessage || '');
+      if (/Content Security Policy/i.test(message)) cspViolations.push(message);
+    });
+  });
 
   const native = { calls: [], answer: 'cancel' };
   dialog.showMessageBox = async (win, opts) => {
@@ -220,7 +238,7 @@ async function start() {
   const menuReload = () => menuItem('View', 'Reload').click();
   const closeWindow = () => win.close();
 
-  return { app, win, wc, js, press, click, clickAt, focus, confirmDialog, connect, native, sentToPage, sleep, menuItem, menuReload, closeWindow, keepAlive, waitForShell };
+  return { app, win, wc, js, press, click, clickAt, focus, confirmDialog, connect, native, sentToPage, sleep, menuItem, menuReload, closeWindow, keepAlive, waitForShell, cspViolations };
 }
 
 // 'css selector' or 'last:css selector' (the last match)

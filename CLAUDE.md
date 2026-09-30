@@ -94,6 +94,13 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 - The key type string comes from the server and is used as a property name, so `describeHostKey()` restricts it to `[A-Za-z0-9@.+-]`. The raw key blob never goes to the renderer.
 - The renderer queues prompts across tabs, and focuses the dialog rather than a button so a stray Enter can't accept a key.
 
+### Content-Security-Policy
+- `index.html` sets `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'` in a `<meta>`, placed before every stylesheet and script, since a `<meta>` policy covers only what follows it. It sits behind escaping: if outside text ever reached `innerHTML` unescaped, it still couldn't run code or load anything.
+- So there is no inline `<script>`, no `on…=` handler attribute, no `eval` or `new Function`, and nothing fetched: no images, fonts, frames or network requests from the page. The preload and IPC are not affected. A feature that needs one of these must widen the policy on purpose, as narrowly as it can.
+- Styles may be inline because xterm and its WebGL addon inject `<style>` elements; `style=` attributes and `element.style` work too.
+- Violations only show as console errors. The e2e harness records them from the first page load, and every e2e file ends with a "no Content-Security-Policy violations" check. `csp.e2e.js` injects an inline handler, a `<script>` and `eval` and checks each is refused, then empties `t.cspViolations`, since those were on purpose. `csp.test.js` checks the policy's wording and position.
+- Code run through the harness's `t.js()` (`executeJavaScript`) isn't blocked by the policy, but `eval` inside it is.
+
 ### Links
 - Terminal output is written by the remote host. `open-external` in `main.js` opens only `http:`/`https:`, because `shell.openExternal` launches any registered protocol handler.
 - The window denies `window.open` (`setWindowOpenHandler`) and blocks `will-navigate`. OSC 8 hyperlinks go through the Terminal's `linkHandler`, whose hover text is the real target. Opening a link needs Ctrl+click (Cmd on macOS) because a plain click selects.
@@ -150,7 +157,7 @@ Three layers, with the security boundary between them (`contextIsolation: true`,
 ## Verifying changes
 
 - **`test/main/`** (`npm test`): `test/helpers/main-harness.js` stubs `electron` through `Module._load`, loads a fresh `main.js` against a temporary `userData`, and calls the captured `ipcMain` handlers directly. `test/helpers/ssh-server.js` wraps ssh2's `Server` as a local SSH endpoint with a host key the test controls, and records pty sizes, window changes and connections accepted. It accepts any login by default; its `authenticate` option makes it a keyboard-interactive, two-factor or key-only server.
-- **`test/e2e/`** (`npm run test:e2e`): `run.js` starts one Electron process per `*.e2e.js` file. `harness.js` repoints `BrowserWindow.prototype.loadFile` at the project, loads `main.js`, drives the page with `webContents.sendInputEvent`, inspects it with `executeJavaScript`, and scripts `dialog.showMessageBox`. Each check prints as soon as it's known, so a hung file shows how far it got.
+- **`test/e2e/`** (`npm run test:e2e`): `run.js` starts one Electron process per `*.e2e.js` file. `harness.js` repoints `BrowserWindow.prototype.loadFile` at the project, loads `main.js`, drives the page with `webContents.sendInputEvent`, inspects it with `executeJavaScript`, and scripts `dialog.showMessageBox`. Each check prints as soon as it's known, so a hung file shows how far it got. `finish()` adds a last check to every file: no Content-Security-Policy violations in the page.
 - **Checking that a test catches a bug:** set `ELECTROSSH_MAIN` to another build of `main.js` (e.g. one taken from an older commit), saved in the project root so it finds `preload.js`. Both harnesses load it instead of `main.js`.
 
 Limits of synthetic input in the e2e tests:
@@ -182,7 +189,7 @@ The original app was built with Gemini. Since then (details in `git log`):
 - **SSH behaviour:** per-host keepalive; fix for pty sizes dropped during the handshake; host key verification; passphrase prompts for encrypted keys; keyboard-interactive and two-factor login.
 - **Review fixes:** bracketed paste and the Ctrl+Shift+V double paste; UTF-8 split across packets; the reconnect race; input before the shell opened; connection dots; reopening the window on macOS; the Help menu; spaces trimmed from a host's name, address and username; random ids for sessions, hosts and keys.
 - **Terminal:** migration to the `@xterm/*` 6 packages; clickable links, find, and font zoom.
-- **Settings and safety:** keyboard shortcuts page; About page; confirmation before closing or reloading the app, or closing a connected tab; in-app confirmations in place of native `confirm()`/`alert()`.
+- **Settings and safety:** keyboard shortcuts page; About page; confirmation before closing or reloading the app, or closing a connected tab; in-app confirmations in place of native `confirm()`/`alert()`; a Content-Security-Policy.
 - **Icons:** every icon redrawn from Lucide, at one stroke weight per size.
 - **Home:** recent connections on the home view; Quick Connect moved to a dialog behind a lightning button, with its own keep-alive setting; app version beside the name.
 - **Copying:** right-click menu on a saved host for its address, display name or SSH port, copied through Electron's clipboard in main.
@@ -201,11 +208,11 @@ The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `p
 - #19: docs;
 - #20: an installer holding only what the app runs (16 MB of app files down to 2.9 MB);
 - #21: invented hosts in the tests;
-- #22: random ids for sessions, hosts and keys.
+- #22: random ids for sessions, hosts and keys;
+- #23: a Content-Security-Policy.
 
 ### Open from the code review
 All confirmed still present on 2026-09-27:
-- **No Content-Security-Policy** in `index.html`. Every `innerHTML` with outside data is escaped today, so a CSP would be a second layer. It needs `'unsafe-inline'` for styles: xterm injects them, and a few elements use `style=`.
 - **Stale password.** A saved host switched from password to key login keeps its old password in `saved_hosts.json`.
 - **Missing key.** A saved host whose key is gone falls back to password login with an empty password (`buildConfigFromHost`), so it fails as a login error rather than saying the key is missing.
 - **puttygen.** `convertPuttyKey()` passes `-passphrase` to puttygen, which probably isn't an option (puttygen takes `--old-passphrase <file>`). This is unverified; puttygen isn't installed on the dev machine. The converted key is also written unencrypted to the temp directory for a moment. The fallback matters: ssh2 reads only PPK v2 RSA/DSA keys, not modern `.ppk` files.
