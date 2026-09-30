@@ -197,7 +197,7 @@ The original app was built with Gemini. Since then (details in `git log`):
 ## Status (as of 2026-10-01)
 
 ### Releases
-The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `package.json` still says 1.7.0, but `main` has moved on. None of the following is in a release yet, so the next one would be 1.8.0:
+The GitHub releases are 1.0.0, 1.5.0 and 1.7.0 (latest, tagged at `7d38648`). `package.json` says 1.8.0, bumped for the next release but not yet tagged. None of the following is in a release yet; they will ship as 1.8.0:
 - #11: paste, split UTF-8, the reconnect race, early input;
 - #12: key passphrases, keyboard-interactive and two-factor login, status dots, reopening on macOS, the Help menu;
 - #13: the About page;
